@@ -1,0 +1,26 @@
+* { box-sizing: border-box; }
+body { margin: 0; width: 420px; max-height: 580px; font: 13px/1.4 system-ui, sans-serif; background: #111827; color: #f3f4f6; }
+header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: #1f2937; position: sticky; top: 0; z-index: 1; }
+h1 { font-size: 15px; margin: 0; }
+.actions { display: flex; gap: 8px; align-items: center; font-size: 12px; color: #d1d5db; }
+button { background: #e11d48; color: #fff; border: 0; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12px; }
+button:hover { background: #be123c; }
+button.ghost { background: #374151; }
+button.ghost:hover { background: #4b5563; }
+button:disabled { opacity: .5; cursor: default; }
+#list, #jobs { padding: 6px 10px; }
+.item, .job { background: #1f2937; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+.name { font-weight: 600; word-break: break-all; color: #fff; }
+.meta { color: #d1d5db; font-size: 11px; margin: 3px 0 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { background: #374151; border-radius: 4px; padding: 0 5px; color: #f9fafb; }
+.tag.hls { background: #7c3aed; }
+.tag.dash { background: #b45309; }
+.tag.file { background: #047857; }
+.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+select { background: #374151; color: #fff; border: 0; border-radius: 6px; padding: 4px; font-size: 12px; max-width: 220px; }
+.bar { height: 6px; background: #374151; border-radius: 3px; overflow: hidden; margin: 6px 0; }
+.bar > div { height: 100%; background: #22c55e; width: 0; transition: width .3s; }
+.err { color: #fca5a5; font-size: 12px; }
+.note { color: #fde68a; font-size: 12px; }
+.hint { color: #d1d5db; padding: 0 12px 12px; font-size: 12px; }
+.empty { color: #d1d5db; text-align: center; padding: 24px 8px; }
