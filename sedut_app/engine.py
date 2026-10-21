@@ -37,6 +37,7 @@ class Download:
     eta: str = ""
     error: str = ""
     final_path: str = ""
+    picked: str = ""              # format sebenar dipilih yt-dlp, cth "313+140 (3840x1634)"
     added: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict:
@@ -67,6 +68,7 @@ def build_command(d: Download, connections: int = 8) -> list[str]:
         "download:SEDUT|%(progress.status)s|%(progress.downloaded_bytes)s|"
         "%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|"
         "%(progress._speed_str)s|%(progress._eta_str)s|%(progress.fragment_index)s|%(progress.fragment_count)s",
+        "--print", "before_dl:SEDUTFMT|%(format_id)s|%(resolution)s",
         "--print", "after_move:SEDUTFILE|%(filepath)s",
         "-o", os.path.join(d.folder, d.filename + ".%(ext)s"),
     ]
@@ -179,13 +181,18 @@ class Runner(QObject):
             if line.startswith("SEDUTFILE|"):
                 d.final_path = line.split("|", 1)[1]
                 return
+            if line.startswith("SEDUTFMT|"):
+                _, fid, res = (line.split("|") + ["", ""])[:3]
+                d.picked = f"{fid} ({res})"
+                self.progress.emit(d.id)
+                return
             info = parse_ytdlp(line)
             if info and info.get("finished"):
                 self._parts += 1
         if info:
             d.done_bytes = info["done"]
-            if info.get("total"):
-                d.size = info["total"]
+            if info.get("total") and (d.kind == "file" or self._parts == 0):
+                d.size = info["total"]   # yt-dlp: saiz bahagian video; audio tak timpa
             d.percent = info["percent"]
             d.speed, d.eta = info["speed"], info["eta"]
             self.progress.emit(d.id)

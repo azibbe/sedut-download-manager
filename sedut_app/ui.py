@@ -269,6 +269,8 @@ class MainWindow(QMainWindow):
     def _render(self, did: str):
         d, row = self.downloads[did], self.rows[did]
         name = d.filename if d.kind == "file" else (os.path.basename(d.final_path) if d.final_path else d.filename + (" [MP3]" if d.audio_only else " [video]"))
+        if d.picked and not d.final_path:
+            name += f"  ·  format {d.picked}"
         self.table.item(row, 0).setText(name)
         self.table.item(row, 0).setToolTip(f"{d.url}\n{d.folder}" + (f"\n\nRalat: {d.error}" if d.error else ""))
         self.table.item(row, 1).setText(human_size(d.size))

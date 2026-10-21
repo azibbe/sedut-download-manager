@@ -108,26 +108,43 @@ def _fmt_size(f: dict) -> int:
     return int(f.get("filesize") or f.get("filesize_approx") or 0)
 
 
+def _pref_video(cand: list[dict]) -> dict:
+    """Tiru pilihan yt-dlp dgn -S res,fps,vcodec:h264 — h264 dulu, kalau tiada ambil tbr tertinggi."""
+    video_only = [f for f in cand if f.get("acodec") in (None, "none")] or cand
+    h264 = [f for f in video_only if str(f.get("vcodec") or "").startswith(("avc1", "h264"))]
+    return max(h264 or video_only, key=lambda f: (f.get("fps") or 0, f.get("tbr") or 0))
+
+
+def _res_label(f: dict) -> str:
+    # video letterbox 3840x1634 -> YouTube labelkan "2160p"; guna label itu, bukan tinggi mentah
+    m = re.search(r"(\d{3,4}p)", str(f.get("format_note") or ""))
+    return m.group(1) if m else f"{f['height']}p"
+
+
 def build_choices(info: dict) -> list[Choice]:
     formats = info.get("formats") or [info]
     # HLS generik selalunya vcodec=None tapi ada height — tetap dikira video
     videos = [f for f in formats if f.get("vcodec") != "none" and f.get("height")]
     audios = [f for f in formats if f.get("vcodec") == "none" and f.get("acodec") not in (None, "none")]
-    best_audio = max((_fmt_size(a) for a in audios), default=0)
+    m4a = [a for a in audios if a.get("ext") == "m4a"]
+    best_audio = max((_fmt_size(a) for a in (m4a or audios)), default=0)
 
     choices: list[Choice] = []
     heights = sorted({f["height"] for f in videos}, reverse=True)
     for i, h in enumerate(heights):
-        cand = [f for f in videos if f["height"] == h]
-        vbest = max(cand, key=lambda f: (f.get("tbr") or 0))
+        vbest = _pref_video([f for f in videos if f["height"] == h])
         has_audio = vbest.get("acodec") not in (None, "none")
         size = _fmt_size(vbest) + (0 if has_audio else best_audio)
-        label = f"{h}p" + (" (terbaik)" if i == 0 else "")
+        label = _res_label(vbest) + (" (terbaik)" if i == 0 else "")
         fps = vbest.get("fps")
         if fps and fps > 30:
             label += f" {int(fps)}fps"
-        choices.append(Choice(label=label, fmt=f"bv*[height<={h}]+ba/b[height<={h}]/b",
-                              sort="vcodec:h264,acodec:m4a", size=size or None))
+        # PENTING: jangan letak acodec dalam -S — ia buat format gabungan 360p (id 18)
+        # menang atas video-only resolusi tinggi. Audio dipilih berasingan (ba[ext=m4a]).
+        choices.append(Choice(
+            label=label,
+            fmt=f"bv*[height<={h}]+ba[ext=m4a]/bv*[height<={h}]+ba/b[height<={h}]/b",
+            sort="res,fps,vcodec:h264", size=size or None))
     if not choices:
         choices.append(Choice(label="Terbaik", fmt="bv*+ba/b", size=_fmt_size(info) or None))
     if audios or videos:
