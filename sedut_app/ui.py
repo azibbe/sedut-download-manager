@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtNetwork import QLocalServer
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QToolBar, QVBoxLayout, QWidget,
 )
 
+from . import ipc
 from .engine import DONE, FAILED, PAUSED, QUEUED, RUNNING, Download, Runner
 from .probe import ProbeResult, human_size, looks_like_url, probe, safe_filename
 
@@ -56,24 +58,45 @@ class _ProbeSignals(QObject):
 
 
 class ProbeTask(QRunnable):
-    def __init__(self, url: str, cookies: str | None):
+    def __init__(self, url: str, cookies: str | None, referer: str | None = None, user_agent: str | None = None):
         super().__init__()
-        self.url, self.cookies = url, cookies
+        self.url, self.cookies, self.referer, self.ua = url, cookies, referer, user_agent
         self.signals = _ProbeSignals()
 
     def run(self):
         try:
-            r = probe(self.url, self.cookies)
+            r = probe(self.url, self.cookies, referer=self.referer, user_agent=self.ua)
         except Exception as e:  # jangan biar thread mati senyap
             r = ProbeResult(kind="none", url=self.url, error=str(e))
         self.signals.done.emit(r)
 
 
 # ------------------------------------------------------------- dialog hasil kesan
+GENERIC = {"index", "master", "playlist", "video", "videoplayback", "chunklist", "manifest",
+           "prog_index", "media", "stream", "file", "download", "fail", "main"}
+
+
+def _better_name(r: ProbeResult, page_title: str | None) -> str | None:
+    """Link dari extension selalunya index.m3u8 / videoplayback — guna tajuk halaman."""
+    if not page_title:
+        return None
+    stem, dot, ext = r.filename.rpartition(".") if r.kind == "file" else (r.filename, "", "")
+    if not dot:
+        stem, ext = r.filename, ""
+    if stem.strip().lower() in GENERIC or stem.lower().startswith(("index", "master")):
+        name = safe_filename(page_title)
+        return f"{name}.{ext}" if ext else name
+    return None
+
+
+
 class DetectDialog(QDialog):
-    def __init__(self, r: ProbeResult, cookies: str | None, parent=None):
+    def __init__(self, r: ProbeResult, cookies: str | None, parent=None, hint: dict | None = None):
         super().__init__(parent)
-        self.r, self.cookies = r, cookies
+        self.r, self.cookies, self.hint = r, cookies, hint or {}
+        better = _better_name(r, self.hint.get("title"))
+        if better:
+            r.filename = better
         self.setWindowTitle("Dikesan — Sedut")
         self.setMinimumWidth(560)
         form = QFormLayout()
@@ -138,6 +161,8 @@ class DetectDialog(QDialog):
             sort=c.sort if c else None, audio_only=bool(c and c.audio_only),
             cookies_browser=self.cookies if self.r.kind == "media" else None,
             size=(c.size if c else self.r.size),
+            referer=self.hint.get("referer") or None,
+            user_agent=self.hint.get("userAgent") or None,
         )
 
 
@@ -156,6 +181,9 @@ class MainWindow(QMainWindow):
         self.rows: dict[str, int] = {}
         self.pool = QThreadPool.globalInstance()
         self._probing = False
+        self._dialog_open = False
+        self._hint: dict = {}
+        self._ext_queue: list[dict] = []
 
         # --- bar URL
         self.url = QLineEdit()
@@ -229,13 +257,25 @@ class MainWindow(QMainWindow):
         self._probing, self._last_probed = True, t
         self.detect_btn.setEnabled(False); self.detect_btn.setText("Mengesan…")
         self.statusBar().showMessage(f"Mengesan {t} …")
-        task = ProbeTask(t, "chrome" if self.cookies.isChecked() else None)
+        hint = self._hint if self._hint.get("url") == t else {}
+        self._hint = hint
+        task = ProbeTask(t, "chrome" if self.cookies.isChecked() else None,
+                         referer=hint.get("referer") or None, user_agent=hint.get("userAgent") or None)
         task.signals.done.connect(self._probed)
         self.pool.start(task)
 
     def _probed(self, r: ProbeResult):
         self._probing = False
         self.detect_btn.setEnabled(True); self.detect_btn.setText("Kesan")
+        self._dialog_open = True
+        try:
+            self._show_result(r)
+        finally:
+            self._dialog_open = False
+            self._hint = {}
+            QTimer.singleShot(0, self._next_external)
+
+    def _show_result(self, r: ProbeResult):
         if r.kind == "none":
             self.statusBar().showMessage("Tiada fail/video dikesan.", 5000)
             msg = r.error or "Tiada fail atau video dikesan pada link ini."
@@ -244,10 +284,63 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Tidak dikesan", msg[:1200])
             return
         self.statusBar().showMessage(f"Dikesan: {r.title}", 4000)
-        dlg = DetectDialog(r, "chrome" if self.cookies.isChecked() else None, self)
+        dlg = DetectDialog(r, "chrome" if self.cookies.isChecked() else None, self, hint=self._hint)
         if dlg.exec() == QDialog.Accepted:
             self.add(dlg.download())
             self.url.clear(); self._last_probed = ""
+
+    # ---------------------------------------------------- terima link dari luar
+    def start_ipc(self) -> bool:
+        """Dengar pada soket Unix supaya extension Chrome / instance kedua boleh hantar link."""
+        path = ipc.socket_path()
+        QLocalServer.removeServer(path)          # soket basi dari crash lama
+        self.server = QLocalServer(self)
+        self.server.setSocketOptions(QLocalServer.UserAccessOption)
+        ok = self.server.listen(path)
+        self.server.newConnection.connect(self._ipc_conn)
+        return ok
+
+    def _ipc_conn(self):
+        while self.server.hasPendingConnections():
+            c = self.server.nextPendingConnection()
+            c.setProperty("buf", b"")
+            c.readyRead.connect(lambda c=c: self._ipc_read(c))
+            c.disconnected.connect(c.deleteLater)
+            if c.bytesAvailable():        # data sampai sebelum readyRead disambung
+                self._ipc_read(c)
+
+    def _ipc_read(self, c):
+        buf = bytes(c.property("buf") or b"") + bytes(c.readAll())
+        c.setProperty("buf", buf)
+        if b"\n" not in buf:
+            return
+        try:
+            payload = json.loads(buf.split(b"\n", 1)[0])
+        except ValueError:
+            c.write(b'{"ok": false, "error": "JSON rosak"}\n'); c.flush(); c.disconnectFromServer()
+            return
+        c.write(b'{"ok": true}\n'); c.flush(); c.disconnectFromServer()
+        if payload.get("action") == "add" and looks_like_url(payload.get("url", "")):
+            self.add_external(payload)
+        elif payload.get("action") == "show":
+            self.showNormal(); self.raise_(); self.activateWindow()
+
+    def add_external(self, payload: dict):
+        self._ext_queue.append(payload)
+        self.showNormal(); self.raise_(); self.activateWindow()
+        n = len(self._ext_queue)
+        self.statusBar().showMessage(f"Link diterima dari Chrome ({n} dalam giliran)", 4000)
+        self._next_external()
+
+    def _next_external(self):
+        if self._probing or self._dialog_open or not self._ext_queue:
+            return
+        p = self._ext_queue.pop(0)
+        self._hint = p
+        self._debounce.stop()
+        self.url.blockSignals(True); self.url.setText(p["url"]); self.url.blockSignals(False)
+        self._last_probed = ""
+        self.detect()
 
     # ---------------------------------------------------- senarai
     def add(self, d: Download, start: bool = True):

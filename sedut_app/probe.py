@@ -75,9 +75,13 @@ def looks_like_url(text: str) -> bool:
 
 
 # ---------------------------------------------------------------- fail terus
-def probe_direct(url: str, timeout: float = 15) -> ProbeResult | None:
+def probe_direct(url: str, timeout: float = 15, referer: str | None = None,
+                 user_agent: str | None = None) -> ProbeResult | None:
     """Minta bait pertama sahaja (Range: bytes=0-0). Pulangkan None kalau HTML/stream."""
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Range": "bytes=0-0"})
+    headers = {"User-Agent": user_agent or UA, "Range": "bytes=0-0"}
+    if referer:
+        headers["Referer"] = referer
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             final = r.geturl()
@@ -153,8 +157,13 @@ def build_choices(info: dict) -> list[Choice]:
     return choices
 
 
-def probe_media(url: str, cookies_browser: str | None = None, timeout: float = 90) -> ProbeResult:
+def probe_media(url: str, cookies_browser: str | None = None, timeout: float = 90,
+                referer: str | None = None, user_agent: str | None = None) -> ProbeResult:
     cmd = ["yt-dlp", "-J", "--no-playlist", "--no-warnings", url]
+    if referer:
+        cmd[1:1] = ["--referer", referer]
+    if user_agent:
+        cmd[1:1] = ["--user-agent", user_agent]
     if cookies_browser:
         cmd[1:1] = ["--cookies-from-browser", cookies_browser]
     try:
@@ -178,12 +187,13 @@ def probe_media(url: str, cookies_browser: str | None = None, timeout: float = 9
                        duration=info.get("duration"), choices=build_choices(info))
 
 
-def probe(url: str, cookies_browser: str | None = None) -> ProbeResult:
+def probe(url: str, cookies_browser: str | None = None, referer: str | None = None,
+          user_agent: str | None = None) -> ProbeResult:
     url = url.strip()
-    direct = probe_direct(url)
+    direct = probe_direct(url, referer=referer, user_agent=user_agent)
     if direct and direct.kind == "file":
         return direct
-    media = probe_media(url, cookies_browser)
+    media = probe_media(url, cookies_browser, referer=referer, user_agent=user_agent)
     if media.kind == "media":
         return media
     # dua-dua gagal: laporkan ralat yang paling berguna

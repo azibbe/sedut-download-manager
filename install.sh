@@ -30,4 +30,22 @@ MimeType=x-scheme-handler/sedut;
 StartupWMClass=sedut
 EOF
 update-desktop-database ~/.local/share/applications 2>/dev/null || true
+
+# --- Native messaging host: extension Chrome "Video Grabber" -> Sedut
+EXT_ID="mjdkcacdjpnnidoahofhfhgajkomcmmc"   # tetap, dari "key" dalam manifest.json extension
+chmod +x "$DIR/sedut_host.py"
+for d in ~/.config/google-chrome ~/.config/chromium ~/.config/BraveSoftware/Brave-Browser; do
+  [[ "$d" == *google-chrome || -d "$d" ]] || continue
+  mkdir -p "$d/NativeMessagingHosts"
+  cat > "$d/NativeMessagingHosts/com.sedut.host.json" <<EOF
+{
+  "name": "com.sedut.host",
+  "description": "Sedut download manager",
+  "path": "$DIR/sedut_host.py",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://$EXT_ID/"]
+}
+EOF
+  echo "Native host didaftar: $d/NativeMessagingHosts/com.sedut.host.json"
+done
 echo "Siap. Cari 'Sedut' dalam menu aplikasi, atau taip: sedut"

@@ -28,6 +28,8 @@ class Download:
     sort: str | None = None
     audio_only: bool = False
     cookies_browser: str | None = None
+    referer: str | None = None
+    user_agent: str | None = None
     size: int | None = None
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
     status: str = QUEUED
@@ -58,8 +60,9 @@ def build_command(d: Download, connections: int = 8) -> list[str]:
             "--file-allocation=none", "--auto-file-renaming=false", "--allow-overwrite=false",
             "--summary-interval=1", "--console-log-level=warn", "--show-console-readout=true",
             "--enable-color=false", "--max-tries=5", "--retry-wait=3",
-            "-d", d.folder, "-o", d.filename, d.url,
-        ]
+            "-d", d.folder, "-o", d.filename,
+        ] + ([f"--referer={d.referer}"] if d.referer else []) \
+          + ([f"--user-agent={d.user_agent}"] if d.user_agent else []) + [d.url]
     cmd = [
         shutil.which("yt-dlp") or "yt-dlp",
         "--newline", "--no-playlist", "--no-colors", "--continue", "--no-mtime",
@@ -80,6 +83,10 @@ def build_command(d: Download, connections: int = 8) -> list[str]:
             cmd += ["-S", d.sort]
     if d.cookies_browser:
         cmd += ["--cookies-from-browser", d.cookies_browser]
+    if d.referer:
+        cmd += ["--referer", d.referer]
+    if d.user_agent:
+        cmd += ["--user-agent", d.user_agent]
     cmd.append(d.url)
     return cmd
 
