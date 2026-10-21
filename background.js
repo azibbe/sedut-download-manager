@@ -217,6 +217,51 @@ chrome.downloads.onChanged.addListener((delta) => {
   }
 });
 
+
+// ---------- Sambungan ke app desktop Sedut (native messaging) ----------
+const SEDUT_HOST = 'com.sedut.host';
+
+async function sendToSedut({ url, referer, title, kind }) {
+  if (!/^(https?|ftp):/i.test(url || '')) return { ok: false, error: 'Link tidak sah' };
+  try {
+    const r = await chrome.runtime.sendNativeMessage(SEDUT_HOST, {
+      action: 'add', url, referer: referer || '', title: title || '', kind: kind || '',
+      userAgent: navigator.userAgent,
+    });
+    return r && r.ok ? { ok: true, how: r.how } : { ok: false, error: r?.error || 'Tiada jawapan dari Sedut' };
+  } catch (e) {
+    const m = String(e.message || e);
+    if (/not found|forbidden|Specified native messaging host/i.test(m)) {
+      return { ok: false, error: 'Sedut belum dipasang untuk Chrome. Jalankan: ~/Projects/sedut/install.sh' };
+    }
+    return { ok: false, error: m };
+  }
+}
+
+function setupMenus() {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({ id: 'sedut-link', title: 'Muat turun dengan Sedut', contexts: ['link'] });
+    chrome.contextMenus.create({ id: 'sedut-media', title: 'Muat turun media ini dengan Sedut', contexts: ['video', 'audio'] });
+    chrome.contextMenus.create({ id: 'sedut-page', title: 'Hantar halaman ini ke Sedut (YouTube, FB…)', contexts: ['page'] });
+  });
+}
+chrome.runtime.onInstalled.addListener(setupMenus);
+chrome.runtime.onStartup.addListener(setupMenus);
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  let url = info.menuItemId === 'sedut-link' ? info.linkUrl
+          : info.menuItemId === 'sedut-media' ? info.srcUrl
+          : info.pageUrl;
+  if (url && url.startsWith('blob:')) url = info.pageUrl;   // video MSE: biar yt-dlp urus halaman
+  const r = await sendToSedut({ url, referer: info.pageUrl || tab?.url, title: tab?.title });
+  if (tab?.id != null) {
+    chrome.action.setBadgeText({ tabId: tab.id, text: r.ok ? '✓' : '!' });
+    chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: r.ok ? '#16a34a' : '#dc2626' });
+    if (!r.ok) chrome.action.setTitle({ tabId: tab.id, title: `Sedut: ${r.error}` });
+    setTimeout(() => updateBadge(tab.id), 2500);
+  }
+});
+
 // ---------- Mesej ----------
 async function handle(msg, sender) {
     switch (msg.type) {
@@ -242,6 +287,8 @@ async function handle(msg, sender) {
       case 'clear':
         await clearTab(msg.tabId);
         return { ok: true };
+      case 'send-to-sedut':
+        return await sendToSedut(msg);
       case 'download-file':
         return await downloadFile(msg);
       case 'hls-info':

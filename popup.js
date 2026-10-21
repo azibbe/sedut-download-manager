@@ -65,6 +65,13 @@ async function renderList() {
       setTimeout(() => (copyBtn.textContent = 'Salin URL'), 1200);
     } }, 'Salin URL');
 
+    const sedutBtn = el('button', { class: 'sedut', title: 'Hantar ke app Sedut (aria2c/yt-dlp)', onclick: async () => {
+      sedutBtn.disabled = true;
+      const r = await msg({ type: 'send-to-sedut', url: it.url, referer: tab.url, title: title(), kind: it.kind });
+      status.replaceChildren(r.ok ? el('div', { class: 'note' }, 'Dihantar ke Sedut ✓') : el('div', { class: 'err' }, r.error));
+      sedutBtn.disabled = false;
+    } }, 'Sedut');
+
     if (it.kind === 'file') {
       const b = el('button', { onclick: async () => {
         b.disabled = true;
@@ -72,13 +79,13 @@ async function renderList() {
         status.replaceChildren(r.ok ? el('div', { class: 'note' }, 'Muat turun dimulakan ✓') : el('div', { class: 'err' }, r.error));
         b.disabled = false;
       } }, 'Muat turun');
-      controls.append(b, copyBtn);
+      controls.append(b, sedutBtn, copyBtn);
     } else if (it.kind === 'hls') {
       const b = el('button', { onclick: () => prepareHls(it, controls, status, b) }, 'Muat turun');
-      controls.append(b, copyBtn);
+      controls.append(b, sedutBtn, copyBtn);
     } else {
-      controls.append(copyBtn);
-      status.append(el('div', { class: 'note' }, 'DASH (.mpd) belum disokong — salin URL dan guna yt-dlp/ffmpeg.'));
+      controls.append(sedutBtn, copyBtn);
+      status.append(el('div', { class: 'note' }, 'DASH (.mpd): extension tak boleh gabung — tekan "Sedut" (yt-dlp boleh).'));
     }
     list.append(card);
   });
@@ -148,6 +155,10 @@ async function renderJobs() {
 (async () => {
   [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   $('#hideSmall').addEventListener('change', renderList);
+  $('#sendPage').addEventListener('click', async () => {
+    const r = await msg({ type: 'send-to-sedut', url: tab.url, referer: tab.url, title: title(), kind: 'page' });
+    $('#hint').textContent = r.ok ? 'Halaman dihantar ke Sedut ✓ (yt-dlp akan kesan video)' : r.error;
+  });
   $('#clear').addEventListener('click', async () => { await msg({ type: 'clear', tabId: tab.id }); renderList(); });
   await renderList();
   await renderJobs();

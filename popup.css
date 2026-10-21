@@ -24,3 +24,5 @@ select { background: #374151; color: #fff; border: 0; border-radius: 6px; paddin
 .note { color: #fde68a; font-size: 12px; }
 .hint { color: #d1d5db; padding: 0 12px 12px; font-size: 12px; }
 .empty { color: #d1d5db; text-align: center; padding: 24px 8px; }
+button.sedut { background: #7c3aed; }
+button.sedut:hover { background: #6d28d9; }
