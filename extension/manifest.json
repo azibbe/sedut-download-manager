@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "Video Grabber",
+  "version": "1.1.0",
+  "description": "Kesan dan muat turun video (MP4/WebM/HLS tanpa DRM) dalam mana-mana laman web.",
+  "permissions": [
+    "webRequest",
+    "downloads",
+    "storage",
+    "tabs",
+    "offscreen",
+    "declarativeNetRequest",
+    "nativeMessaging",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Video Grabber",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtRnbdauae3elsqPYqcipfwuDV/tC4G5cs2unPtbFkyGQer975lXKbhDRfeUSBesf3UNdzHhLrgWKmMoCuOPDuI/IcYWAHp8UecrMkUQnZA4hPYZ0L8jm+8ugOZGx4Q4mAse+D8GSrTpCBLukaVJkdMTRcoUC+ea4cPC267V8g3Udrp9ZFxaR2Mwv3kqYJ9dJkrfjqd+5ULikdx5L8LUoXenpdIjf1ScIKlH0qUr5HxVOfKcUjvz7495GNNAOnGs45rc5sNrx9JEz/bDk1GDDKINGwgu7Kiqu5+eKu/s48mO2ltBuBqYb7a/7/4tL9PyRbQQL4K5U232WCUc31G11VQIDAQAB"
+}
