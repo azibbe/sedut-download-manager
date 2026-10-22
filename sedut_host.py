@@ -1,9 +1,9 @@
 #!/usr/bin/python3
-"""Native messaging host untuk extension Chrome "Video Grabber".
+"""Native messaging host for the "Video Grabber" Chrome extension.
 
-Chrome jalankan skrip ini, hantar satu mesej (4 bait panjang + JSON), dan
-tunggu jawapan. Kita terus hantar link ke Sedut yang sedang berjalan; kalau
-Sedut belum dibuka, kita buka dulu kemudian hantar.
+Chrome runs this script, sends one message (4-byte length + JSON) and waits
+for a reply. We forward the link to the running Sedut; if Sedut is not open
+yet, we launch it first and then send the link.
 """
 import json
 import os
@@ -63,7 +63,7 @@ def main():
         write_msg({"ok": True, "running": ipc.send({"action": "ping"}) is not None})
         return
     if msg.get("action") != "add" or not msg.get("url"):
-        write_msg({"ok": False, "error": "Mesej tidak sah"})
+        write_msg({"ok": False, "error": "Invalid message"})
         return
     payload = {k: msg.get(k, "") for k in ("action", "url", "referer", "title", "kind", "userAgent")}
 
@@ -72,14 +72,14 @@ def main():
     if r is None:
         how = "launched"
         launch_sedut()
-        for _ in range(60):          # tunggu Sedut sedia (≤ 15 s)
+        for _ in range(60):          # wait for Sedut to be ready (≤ 15 s)
             time.sleep(0.25)
             r = ipc.send(payload)
             if r is not None:
                 break
     if r is None:
-        log(f"GAGAL hantar {payload['url']}")
-        write_msg({"ok": False, "error": "Sedut tidak dapat dibuka"})
+        log(f"FAILED to send {payload['url']}")
+        write_msg({"ok": False, "error": "Could not start Sedut"})
     else:
         log(f"{how}: {payload['url']}")
         write_msg({"ok": bool(r.get("ok", True)), "how": how, "error": r.get("error")})

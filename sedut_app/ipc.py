@@ -1,9 +1,9 @@
-"""ipc.py — satu instance Sedut sahaja; instance kedua / native host hantar link ke sini.
+"""ipc.py — a single Sedut instance; a second instance / the native host sends links here.
 
-Protokol: satu baris JSON per sambungan melalui soket Unix
+Protocol: one JSON line per connection over a Unix socket
     {"action": "add", "url": "...", "referer": "...", "title": "..."}
-Jawapan: {"ok": true}
-Tiada import Qt di sini supaya native host kekal ringan dan cepat.
+Reply: {"ok": true}
+No Qt imports here so the native host stays light and fast.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def socket_path() -> str:
 
 
 def send(payload: dict, timeout: float = 3.0) -> dict | None:
-    """Hantar ke instance yang sedang berjalan. None = tiada instance."""
+    """Send to the running instance. None = no instance running."""
     path = socket_path()
     if not os.path.exists(path):
         return None

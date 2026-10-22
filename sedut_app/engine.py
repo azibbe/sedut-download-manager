@@ -1,7 +1,7 @@
-"""engine.py — jalankan muat turun guna aria2c (fail terus) atau yt-dlp (video).
+"""engine.py — run downloads with aria2c (direct files) or yt-dlp (video).
 
-Jeda = hentikan proses. Sambung = jalankan semula; aria2c (-c, fail .aria2)
-dan yt-dlp (fail .part) sambung dari tempat ia berhenti.
+Pause = stop the process. Resume = run it again; aria2c (-c, .aria2 file)
+and yt-dlp (.part file) continue from where they stopped.
 """
 from __future__ import annotations
 
@@ -15,7 +15,9 @@ from dataclasses import dataclass, field, asdict
 from PySide6.QtCore import QObject, QProcess, Signal
 
 # status
-QUEUED, RUNNING, PAUSED, DONE, FAILED = "Menunggu", "Memuat turun", "Dijeda", "Siap", "Gagal"
+QUEUED, RUNNING, PAUSED, DONE, FAILED = "Queued", "Downloading", "Paused", "Done", "Failed"
+# status values saved by versions before the English UI
+LEGACY_STATUS = {"Menunggu": QUEUED, "Memuat turun": RUNNING, "Dijeda": PAUSED, "Siap": DONE, "Gagal": FAILED}
 
 
 @dataclass
@@ -23,7 +25,7 @@ class Download:
     url: str
     kind: str                     # 'file' | 'media'
     folder: str
-    filename: str                 # tanpa sambungan untuk 'media'
+    filename: str                 # without extension for 'media'
     fmt: str | None = None
     sort: str | None = None
     audio_only: bool = False
@@ -39,7 +41,7 @@ class Download:
     eta: str = ""
     error: str = ""
     final_path: str = ""
-    picked: str = ""              # format sebenar dipilih yt-dlp, cth "313+140 (3840x1634)"
+    picked: str = ""              # format actually picked by yt-dlp, e.g. "313+140 (3840x1634)"
     added: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict:
@@ -48,10 +50,12 @@ class Download:
     @classmethod
     def from_dict(cls, d: dict) -> "Download":
         known = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
+        if known.get("status") in LEGACY_STATUS:
+            known["status"] = LEGACY_STATUS[known["status"]]
         return cls(**known)
 
 
-# ------------------------------------------------------------- bina arahan
+# ------------------------------------------------------------- build command
 def build_command(d: Download, connections: int = 8) -> list[str]:
     if d.kind == "file":
         return [
@@ -66,7 +70,7 @@ def build_command(d: Download, connections: int = 8) -> list[str]:
     cmd = [
         shutil.which("yt-dlp") or "yt-dlp",
         "--newline", "--no-playlist", "--no-colors", "--continue", "--no-mtime",
-        "-N", str(connections),       # muat turun serpihan HLS/DASH serentak
+        "-N", str(connections),       # download HLS/DASH fragments in parallel
         "--progress-template",
         "download:SEDUT|%(progress.status)s|%(progress.downloaded_bytes)s|"
         "%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|"
@@ -141,7 +145,7 @@ def parse_ytdlp(line: str) -> dict | None:
 
 # ------------------------------------------------------------- runner
 class Runner(QObject):
-    """Satu QProcess untuk satu muat turun."""
+    """One QProcess per download."""
     progress = Signal(str)          # id
     finished = Signal(str)          # id
 
@@ -156,7 +160,7 @@ class Runner(QObject):
         self._buf = ""
         self._tail: list[str] = []
         self._stopping = False
-        self._parts = 0             # yt-dlp: video+audio = 2 bahagian
+        self._parts = 0             # yt-dlp: video+audio = 2 parts
 
     def start(self):
         os.makedirs(self.d.folder, exist_ok=True)
@@ -199,20 +203,20 @@ class Runner(QObject):
         if info:
             d.done_bytes = info["done"]
             if info.get("total") and (d.kind == "file" or self._parts == 0):
-                d.size = info["total"]   # yt-dlp: saiz bahagian video; audio tak timpa
+                d.size = info["total"]   # yt-dlp: size of the video part; audio doesn't overwrite it
             d.percent = info["percent"]
             d.speed, d.eta = info["speed"], info["eta"]
             self.progress.emit(d.id)
         else:
             self._tail = (self._tail + [line])[-8:]
             if d.kind == "media" and ("[Merger]" in line or "[ExtractAudio]" in line):
-                d.speed, d.eta = "", "menggabung…" if "[Merger]" in line else "tukar MP3…"
+                d.speed, d.eta = "", "merging…" if "[Merger]" in line else "converting to MP3…"
                 self.progress.emit(d.id)
 
     def _error(self, err):
         if err == QProcess.FailedToStart:
             self.d.status = FAILED
-            self.d.error = "Gagal mula proses (aria2c/yt-dlp dipasang?)"
+            self.d.error = "Failed to start process (are aria2c/yt-dlp installed?)"
             self.finished.emit(self.d.id)
 
     def _done(self, code, _status):
@@ -229,5 +233,5 @@ class Runner(QObject):
         else:
             d.status = FAILED
             errs = [l for l in self._tail if "error" in l.lower() or "ERROR" in l] or self._tail
-            d.error = (errs[-1] if errs else f"kod keluar {code}").replace("ERROR: ", "")[:300]
+            d.error = (errs[-1] if errs else f"exit code {code}").replace("ERROR: ", "")[:300]
         self.finished.emit(d.id)

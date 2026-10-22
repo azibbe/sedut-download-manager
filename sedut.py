@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Sedut — download manager ringkas untuk CachyOS / KDE Plasma."""
+"""Sedut — a simple download manager for CachyOS / KDE Plasma."""
 import os
 import sys
 
@@ -13,7 +13,7 @@ from sedut_app.ui import MainWindow  # noqa: E402
 
 def main():
     url = sys.argv[1] if len(sys.argv) > 1 else ""
-    # Sedut dah terbuka? Hantar link (atau minta naikkan tetingkap) dan keluar.
+    # Sedut already open? Send it the link (or ask it to raise its window) and exit.
     if ipc.send({"action": "add", "url": url} if url else {"action": "show"}) is not None:
         return
     app = QApplication(sys.argv)
@@ -21,7 +21,7 @@ def main():
     app.setDesktopFileName("sedut")
     w = MainWindow()
     w.start_ipc()
-    if url:                        # sedut <url> — terus kesan
+    if url:                        # sedut <url> — detect right away
         w.url.setText(url)
     w.show()
     sys.exit(app.exec())

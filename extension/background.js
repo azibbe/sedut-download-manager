@@ -1,15 +1,15 @@
-// background.js — service worker: kesan video, urus muat turun
+// background.js — service worker: detect videos, manage downloads
 import { parseM3U8 } from './hls.js';
 
 const FILE_EXT = ['mp4', 'webm', 'mov', 'm4v', 'mkv', 'ogv', 'flv', 'avi', '3gp'];
 const SKIP_EXT = ['ts', 'm4s', 'aac', 'vtt', 'key'];
 const HLS_MIME = ['application/vnd.apple.mpegurl', 'application/x-mpegurl', 'audio/mpegurl', 'audio/x-mpegurl'];
 
-// ---------- Storan per tab (storage.session supaya tahan SW mati) ----------
+// ---------- Per-tab storage (storage.session so it survives SW restarts) ----------
 const cache = new Map(); // tabId -> {items:{}, blobVideos:0}
 let writeChain = Promise.resolve();
 
-const loading = new Map(); // tabId -> Promise (elak race bila banyak event serentak)
+const loading = new Map(); // tabId -> Promise (avoids races when many events arrive at once)
 async function getTab(tabId) {
   if (cache.has(tabId)) return cache.get(tabId);
   if (!loading.has(tabId)) {
@@ -48,7 +48,7 @@ async function addItem(tabId, item) {
   const data = await getTab(tabId);
   const prev = data.items[item.url];
   if (prev) {
-    // gabung maklumat: kekalkan saiz terbesar & mime yang diketahui
+    // merge info: keep the largest size & any known mime
     prev.size = Math.max(prev.size || 0, item.size || 0) || null;
     prev.mime ||= item.mime;
     prev.kind = prev.kind === 'unknown' ? item.kind : prev.kind;
@@ -59,7 +59,7 @@ async function addItem(tabId, item) {
   persist(tabId);
 }
 
-// ---------- Klasifikasi ----------
+// ---------- Classification ----------
 function extOf(url) {
   try {
     const p = new URL(url).pathname.toLowerCase();
@@ -92,7 +92,7 @@ function sizeFromHeaders(headers) {
   return Number.isFinite(cl) ? cl : null;
 }
 
-// ---------- Pengesanan rangkaian ----------
+// ---------- Network detection ----------
 chrome.webRequest.onBeforeRequest.addListener(
   (d) => { if (d.tabId >= 0 && d.frameId === 0) clearTab(d.tabId); },
   { urls: ['<all_urls>'], types: ['main_frame'] }
@@ -105,7 +105,7 @@ chrome.webRequest.onHeadersReceived.addListener(
     const c = classify(d.url, mime);
     if (!c) return;
     const size = sizeFromHeaders(d.responseHeaders);
-    // segmen kecil (cth. potongan MSE) bukan video penuh — abaikan fail < 50KB tanpa sambungan dikenali
+    // small segments (e.g. MSE chunks) are not full videos — ignore files < 50KB without a known extension
     if (c.kind === 'file' && size && size < 50 * 1024 && !FILE_EXT.includes(extOf(d.url))) return;
     addItem(d.tabId, { url: d.url, kind: c.kind, ext: c.ext, mime: mime.split(';')[0], size, source: 'network' });
   },
@@ -118,7 +118,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.session.remove(`tab_${tabId}`);
 });
 
-// ---------- Referer: sesetengah CDN tolak permintaan tanpa Referer laman asal ----------
+// ---------- Referer: some CDNs reject requests without the original page's Referer ----------
 let ruleSeq = 1000;
 async function addRefererRule(referer, condition) {
   if (!referer || !/^https?:/.test(referer)) return null;
@@ -137,14 +137,14 @@ function removeRule(id) {
   if (id) chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [id] }).catch(() => {});
 }
 
-// ---------- Nama fail ----------
+// ---------- File names ----------
 function safeName(title, ext) {
   let base = (title || 'video').replace(/[\\/:*?"<>|\x00-\x1f~]/g, '_').replace(/\s+/g, ' ').trim();
   base = base.replace(/^\.+/, '').slice(0, 120) || 'video';
   return `${base}.${ext}`;
 }
 
-// ---------- Muat turun fail terus ----------
+// ---------- Direct file downloads ----------
 const downloadRules = new Map(); // downloadId -> ruleId
 async function downloadFile({ url, title, ext, referer }) {
   let host = '';
@@ -163,7 +163,7 @@ async function downloadFile({ url, title, ext, referer }) {
   }
 }
 
-// ---------- HLS melalui offscreen document ----------
+// ---------- HLS via the offscreen document ----------
 const jobs = {}; // jobId -> {status, done, total, title, error}
 const jobRules = {};
 const blobDownloads = new Map(); // downloadId -> blobUrl
@@ -175,7 +175,7 @@ async function ensureOffscreen() {
     await chrome.offscreen.createDocument({
       url: 'offscreen.html',
       reasons: ['BLOBS'],
-      justification: 'Gabungkan segmen HLS menjadi satu fail video untuk dimuat turun.',
+      justification: 'Join HLS segments into a single video file for download.',
     });
   } catch (e) {
     if (!String(e).includes('single offscreen')) throw e;
@@ -184,7 +184,7 @@ async function ensureOffscreen() {
 
 async function startHls({ url, variantUrl, audioUrl, title, referer }) {
   const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  jobs[jobId] = { status: 'mula', done: 0, total: 0, title, error: null };
+  jobs[jobId] = { status: 'starting', done: 0, total: 0, title, error: null };
   jobRules[jobId] = await addRefererRule(referer, { initiatorDomains: [chrome.runtime.id] });
   await ensureOffscreen();
   chrome.runtime.sendMessage({ target: 'offscreen', type: 'hls-start', jobId, url, variantUrl, audioUrl, title });
@@ -218,21 +218,21 @@ chrome.downloads.onChanged.addListener((delta) => {
 });
 
 
-// ---------- Sambungan ke app desktop Sedut (native messaging) ----------
+// ---------- Connection to the Sedut desktop app (native messaging) ----------
 const SEDUT_HOST = 'com.sedut.host';
 
 async function sendToSedut({ url, referer, title, kind }) {
-  if (!/^(https?|ftp):/i.test(url || '')) return { ok: false, error: 'Link tidak sah' };
+  if (!/^(https?|ftp):/i.test(url || '')) return { ok: false, error: 'Invalid link' };
   try {
     const r = await chrome.runtime.sendNativeMessage(SEDUT_HOST, {
       action: 'add', url, referer: referer || '', title: title || '', kind: kind || '',
       userAgent: navigator.userAgent,
     });
-    return r && r.ok ? { ok: true, how: r.how } : { ok: false, error: r?.error || 'Tiada jawapan dari Sedut' };
+    return r && r.ok ? { ok: true, how: r.how } : { ok: false, error: r?.error || 'No reply from Sedut' };
   } catch (e) {
     const m = String(e.message || e);
     if (/not found|forbidden|Specified native messaging host/i.test(m)) {
-      return { ok: false, error: 'Sedut belum dipasang untuk Chrome. Jalankan install.sh dalam folder Sedut.' };
+      return { ok: false, error: 'Sedut is not set up for Chrome yet. Run install.sh in the Sedut folder.' };
     }
     return { ok: false, error: m };
   }
@@ -240,9 +240,9 @@ async function sendToSedut({ url, referer, title, kind }) {
 
 function setupMenus() {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: 'sedut-link', title: 'Muat turun dengan Sedut', contexts: ['link'] });
-    chrome.contextMenus.create({ id: 'sedut-media', title: 'Muat turun media ini dengan Sedut', contexts: ['video', 'audio'] });
-    chrome.contextMenus.create({ id: 'sedut-page', title: 'Hantar halaman ini ke Sedut (YouTube, FB…)', contexts: ['page'] });
+    chrome.contextMenus.create({ id: 'sedut-link', title: 'Download with Sedut', contexts: ['link'] });
+    chrome.contextMenus.create({ id: 'sedut-media', title: 'Download this media with Sedut', contexts: ['video', 'audio'] });
+    chrome.contextMenus.create({ id: 'sedut-page', title: 'Send this page to Sedut (YouTube, FB…)', contexts: ['page'] });
   });
 }
 chrome.runtime.onInstalled.addListener(setupMenus);
@@ -252,7 +252,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   let url = info.menuItemId === 'sedut-link' ? info.linkUrl
           : info.menuItemId === 'sedut-media' ? info.srcUrl
           : info.pageUrl;
-  if (url && url.startsWith('blob:')) url = info.pageUrl;   // video MSE: biar yt-dlp urus halaman
+  if (url && url.startsWith('blob:')) url = info.pageUrl;   // MSE video: let yt-dlp handle the page
   const r = await sendToSedut({ url, referer: info.pageUrl || tab?.url, title: tab?.title });
   if (tab?.id != null) {
     chrome.action.setBadgeText({ tabId: tab.id, text: r.ok ? '✓' : '!' });
@@ -262,7 +262,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
-// ---------- Mesej ----------
+// ---------- Messages ----------
 async function handle(msg, sender) {
     switch (msg.type) {
       case 'dom-videos': {
@@ -303,26 +303,26 @@ async function handle(msg, sender) {
         delete jobs[msg.jobId];
         return { ok: true };
 
-      // --- daripada offscreen ---
+      // --- from offscreen ---
       case 'job-progress':
         if (jobs[msg.jobId]) Object.assign(jobs[msg.jobId], { status: msg.status, done: msg.done, total: msg.total, bytes: msg.bytes });
         return;
       case 'job-error':
-        if (jobs[msg.jobId]) Object.assign(jobs[msg.jobId], { status: 'gagal', error: msg.error });
+        if (jobs[msg.jobId]) Object.assign(jobs[msg.jobId], { status: 'failed', error: msg.error });
         removeRule(jobRules[msg.jobId]); delete jobRules[msg.jobId];
         return;
       case 'job-file': {
-        // satu job boleh hasilkan 2 fail (video + audio berasingan)
+        // one job can produce 2 files (separate video + audio)
         try {
           const id = await chrome.downloads.download({ url: msg.blobUrl, filename: safeName(msg.title, msg.ext) });
           blobDownloads.set(id, msg.blobUrl);
         } catch (e) {
-          if (jobs[msg.jobId]) Object.assign(jobs[msg.jobId], { status: 'gagal', error: String(e.message || e) });
+          if (jobs[msg.jobId]) Object.assign(jobs[msg.jobId], { status: 'failed', error: String(e.message || e) });
         }
         return;
       }
       case 'job-done':
-        if (jobs[msg.jobId]) Object.assign(jobs[msg.jobId], { status: 'siap', note: msg.note || null });
+        if (jobs[msg.jobId]) Object.assign(jobs[msg.jobId], { status: 'done', note: msg.note || null });
         removeRule(jobRules[msg.jobId]); delete jobRules[msg.jobId];
         return;
     }
@@ -330,10 +330,10 @@ async function handle(msg, sender) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.target === 'offscreen') return; // bukan untuk kita
+  if (msg.target === 'offscreen') return; // not for us
   handle(msg, sender).then(
     (r) => sendResponse(r ?? { ok: true }),
     (e) => sendResponse({ ok: false, error: String(e?.message || e) })
   );
-  return true; // respons async
+  return true; // async response
 });

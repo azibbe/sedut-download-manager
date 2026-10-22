@@ -1,4 +1,4 @@
-// content.js — imbas DOM untuk elemen <video>, <source>, og:video & pautan video
+// content.js — scan the DOM for <video>, <source>, og:video & video links
 (() => {
   if (window.__videoGrabberLoaded) return;
   window.__videoGrabberLoaded = true;
@@ -49,6 +49,6 @@
   new MutationObserver(schedule).observe(document.documentElement, {
     childList: true, subtree: true, attributes: true, attributeFilter: ['src'],
   });
-  // video yang tukar sumber semasa main
+  // videos that change source while playing
   document.addEventListener('loadstart', schedule, true);
 })();

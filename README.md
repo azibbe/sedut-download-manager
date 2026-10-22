@@ -3,12 +3,11 @@
 A small, no-nonsense download manager for Linux desktops (built on CachyOS / KDE Plasma), written in Python + PySide6.
 Paste a link, Sedut figures out what it is, and downloads it — direct files through **aria2c**, video/streams through **yt-dlp**.
 
-> *Sedut* is Malay for "to suck in / slurp". The user interface is in Bahasa Melayu.
-> Ringkasan BM ada di [bawah](#ringkasan-bahasa-melayu).
+> *Sedut* is Malay for "to suck in / slurp".
 
 ## Features
 
-- **Paste and go** — paste a URL in the top bar; Sedut auto-detects it after 0.5 s (or press Enter / *Kesan*).
+- **Paste and go** — paste a URL in the top bar; Sedut auto-detects it after 0.5 s (or press Enter / *Detect*).
 - **Smart detection**
   - Direct files: a `Range: bytes=0-0` probe reads size, filename (`Content-Disposition`, RFC 5987) and whether the server supports resume.
   - Anything else (YouTube, Facebook, Vimeo, generic HLS `.m3u8` / DASH `.mpd`, …) is handed to `yt-dlp -J`.
@@ -16,8 +15,8 @@ Paste a link, Sedut figures out what it is, and downloads it — direct files th
 - **Fast downloads** — aria2c with 8 connections per file; yt-dlp fetches HLS/DASH fragments 8 at a time.
 - **Pause / resume** — survives app restarts (aria2c `.aria2` control files, yt-dlp `.part` files).
 - **Queue** — up to 3 downloads run at once, the rest wait.
-- **Auto-sorted folders** — `~/Downloads/Sedut/{Video,Muzik,Dokumen,Program,Mampatan,Gambar,Lain}`.
-- **Browser cookies** — tick *Guna cookies Chrome* for sites that require login or a "not a bot" check (`yt-dlp --cookies-from-browser chrome`).
+- **Auto-sorted folders** — `~/Downloads/Sedut/{Video,Music,Documents,Programs,Archives,Images,Other}`.
+- **Browser cookies** — tick *Use Chrome cookies* for sites that require login or a "not a bot" check (`yt-dlp --cookies-from-browser chrome`).
 - **Single instance** — running `sedut <url>` while Sedut is open sends the link to the existing window (Unix socket).
 - **Browser integration (optional)** — the bundled Video Grabber extension sends links (with Referer, User-Agent and page title) straight into Sedut through a native messaging host.
 - Desktop notifications on finish/failure (`notify-send`), download list persisted between sessions.
@@ -67,10 +66,10 @@ sedut <url>        # open (or reuse the running window) and detect <url>
 ```
 
 1. Paste a link into the top bar.
-2. In the *Dikesan* dialog, choose quality, file name and folder.
-3. Click *Muat turun* (Download).
+2. In the *Detected* dialog, choose quality, file name and folder.
+3. Click *Download*.
 
-Toolbar / right-click menu: *Sambung* (resume / retry), *Jeda* (pause), *Buang* (remove from list, optionally delete files), *Buka fail* (open file), *Buka folder* (open folder), *Salin link* (copy link). Double-click a finished item to open it.
+Toolbar / right-click menu: *Resume* (also retries failed items), *Pause*, *Remove* (from the list, optionally deleting the files), *Open file*, *Open folder*, *Copy link*. Double-click a finished item to open it.
 
 Test detection from a terminal without the GUI:
 
@@ -89,8 +88,8 @@ On its own it:
 
 With Sedut installed it adds:
 
-- a **Sedut** button per detected video and a **Halaman → Sedut** button (sends the page URL so yt-dlp can handle YouTube, Facebook, TikTok…);
-- right-click menu items: *Muat turun dengan Sedut* (link), *Muat turun media ini dengan Sedut* (video/audio), *Hantar halaman ini ke Sedut* (page).
+- a **Sedut** button per detected video and a **Page → Sedut** button (sends the page URL so yt-dlp can handle YouTube, Facebook, TikTok…);
+- right-click menu items: *Download with Sedut* (link), *Download this media with Sedut* (video/audio), *Send this page to Sedut* (page).
 
 Links are sent with the page's Referer, User-Agent and title, so Sedut names files after the page instead of `index.m3u8`.
 
@@ -102,7 +101,7 @@ Install it:
 
 The extension ID is fixed at `mjdkcacdjpnnidoahofhfhgajkomcmmc` by the public `key` in `extension/manifest.json`, which is exactly the ID `install.sh` allows. If you remove that key or load a fork with a different key, update `EXT_ID` in `install.sh` and re-run it.
 
-Limits: DRM-protected video (Netflix, Disney+, Widevine/FairPlay) is not supported, by design. YouTube and other MSE players split video into small ranges, so use the *Halaman → Sedut* button for those. See [`extension/README.md`](extension/README.md) (Malay) for details.
+Limits: DRM-protected video (Netflix, Disney+, Widevine/FairPlay) is not supported, by design. YouTube and other MSE players split video into small ranges, so use the *Page → Sedut* button for those. See [`extension/README.md`](extension/README.md) for details.
 
 ### Native messaging protocol
 
@@ -155,25 +154,3 @@ rm -r ~/.local/share/sedut ~/.local/state/sedut   # download history and log
 
 [MIT](LICENSE) © 2026 azibbe — covers both the Sedut app and the `extension/` folder.
 Sedut calls `aria2c`, `yt-dlp` and `ffmpeg` as external programs; they keep their own licenses.
-
----
-
-## Ringkasan (Bahasa Melayu)
-
-Sedut ialah download manager ringkas untuk Linux (CachyOS / KDE Plasma), guna PySide6.
-
-- Paste link dalam kotak atas → Sedut kesan sendiri (0.5 s) → pilih kualiti/folder → *Muat turun*.
-- Fail terus → aria2c, 8 sambungan, boleh Jeda/Sambung (walaupun selepas tutup aplikasi).
-- Video/HLS → yt-dlp (+ffmpeg gabung video+audio jadi MP4, atau MP3).
-- YouTube/FB minta log masuk → tanda *Guna cookies Chrome*.
-- Extension Chrome "Video Grabber" ada dalam folder `extension/` — *Load unpacked* di `chrome://extensions`, kemudian butang *Sedut* / menu klik kanan hantar link terus ke app.
-- Fail disusun ke `~/Downloads/Sedut/{Video,Muzik,Dokumen,Program,Mampatan,Gambar,Lain}`.
-
-Pasang:
-
-```bash
-sudo pacman -S --needed pyside6 yt-dlp aria2 ffmpeg
-./install.sh
-sedut            # atau cari "Sedut" dalam menu
-sedut <url>      # terus kesan
-```

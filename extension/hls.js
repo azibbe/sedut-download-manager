@@ -1,10 +1,10 @@
-// hls.js — parser M3U8 ringkas (dikongsi oleh background & offscreen)
+// hls.js — small M3U8 parser (shared by background & offscreen)
 
 function resolveUrl(u, base) {
   try { return new URL(u, base).href; } catch { return u; }
 }
 
-// Parse senarai atribut: KEY=VALUE,KEY="VALUE, dengan koma",...
+// Parse an attribute list: KEY=VALUE,KEY="VALUE, with commas",...
 export function parseAttrs(str) {
   const out = {};
   const re = /([A-Z0-9-]+)=("[^"]*"|[^,]*)/g;
@@ -28,7 +28,7 @@ function parseByteRange(str, prevEnd) {
 export function parseM3U8(text, baseUrl) {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   if (!lines.length || !lines[0].startsWith('#EXTM3U')) {
-    throw new Error('Bukan playlist M3U8 yang sah');
+    throw new Error('Not a valid M3U8 playlist');
   }
 
   const result = {
@@ -83,7 +83,7 @@ export function parseM3U8(text, baseUrl) {
         currentKey = { method, uri: resolveUrl(a.URI, baseUrl), iv: a.IV || null };
         if (result.encryption === 'NONE') result.encryption = 'AES-128';
       } else {
-        // SAMPLE-AES / FairPlay / Widevine / PlayReady = DRM. Tidak disokong.
+        // SAMPLE-AES / FairPlay / Widevine / PlayReady = DRM. Not supported.
         result.encryption = 'DRM';
         currentKey = { method, drm: true };
       }
@@ -117,7 +117,7 @@ export function parseM3U8(text, baseUrl) {
   return result;
 }
 
-// IV AES-128: atribut IV (hex) atau nombor jujukan media 16-bait big-endian.
+// AES-128 IV: the IV attribute (hex) or the media sequence number as 16-byte big-endian.
 export function ivFor(key, seq) {
   const iv = new Uint8Array(16);
   if (key.iv) {

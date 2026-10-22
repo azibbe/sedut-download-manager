@@ -1,4 +1,4 @@
-// offscreen.js — muat turun & gabung segmen HLS (perlu DOM untuk Blob URL)
+// offscreen.js — download & join HLS segments (needs a DOM for Blob URLs)
 import { parseM3U8, ivFor } from './hls.js';
 
 const CONCURRENCY = 6;
@@ -14,10 +14,10 @@ async function fetchBytes(url, signal, byteRange) {
   for (let i = 0; i < RETRIES; i++) {
     try {
       const res = await fetch(url, { signal, headers, credentials: 'include' });
-      if (!res.ok) throw new Error(`HTTP ${res.status} untuk ${url}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
       return new Uint8Array(await res.arrayBuffer());
     } catch (e) {
-      if (signal.aborted) throw new Error('Dibatalkan');
+      if (signal.aborted) throw new Error('Cancelled');
       lastErr = e;
       await new Promise((r) => setTimeout(r, 800 * (i + 1)));
     }
@@ -40,12 +40,12 @@ async function getKey(uri, signal) {
   return keyCache.get(uri);
 }
 
-// Muat turun satu media playlist -> {blob, ext}
+// Download one media playlist -> {blob, ext}
 async function downloadMedia(playlistUrl, jobId, label, signal, progress) {
   const pl = await fetchPlaylist(playlistUrl, signal);
-  if (pl.isMaster) throw new Error('Playlist media dijangka, dapat master');
-  if (pl.encryption === 'DRM') throw new Error('Stream ini dilindungi DRM (Widevine/FairPlay/SAMPLE-AES) — tidak disokong.');
-  if (!pl.segments.length) throw new Error('Tiada segmen dalam playlist');
+  if (pl.isMaster) throw new Error('Expected a media playlist, got a master playlist');
+  if (pl.encryption === 'DRM') throw new Error('This stream is DRM-protected (Widevine/FairPlay/SAMPLE-AES) — not supported.');
+  if (!pl.segments.length) throw new Error('No segments in playlist');
 
   const parts = new Array(pl.segments.length);
   let next = 0;
@@ -63,7 +63,7 @@ async function downloadMedia(playlistUrl, jobId, label, signal, progress) {
       parts[i] = data;
       progress.done++;
       progress.bytes += data.byteLength;
-      send({ type: 'job-progress', jobId, status: `muat turun ${label}`, done: progress.done, total: progress.total, bytes: progress.bytes });
+      send({ type: 'job-progress', jobId, status: `downloading ${label}`, done: progress.done, total: progress.total, bytes: progress.bytes });
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, pl.segments.length) }, worker));
@@ -73,7 +73,7 @@ async function downloadMedia(playlistUrl, jobId, label, signal, progress) {
     parts.unshift(await fetchBytes(pl.map.url, signal, pl.map.byteRange)); // init segment fMP4
     ext = 'mp4'; type = 'video/mp4';
   } else if (parts[0] && parts[0][0] !== 0x47) {
-    // bukan MPEG-TS (bait sync 0x47) — mungkin fMP4/ADTS
+    // not MPEG-TS (sync byte 0x47) — probably fMP4/ADTS
     ext = 'mp4'; type = 'video/mp4';
   }
   return { blob: new Blob(parts, { type }), ext, live: !pl.endList };
@@ -85,11 +85,11 @@ async function runJob({ jobId, url, variantUrl, audioUrl, title }) {
   const progress = { done: 0, total: 0, bytes: 0 };
   try {
     let videoUrl = variantUrl || url;
-    // kalau diberi master tanpa pilihan, ambil kualiti tertinggi
+    // given a master with no choice made, take the highest quality
     const first = await fetchPlaylist(videoUrl, ctrl.signal);
     if (first.isMaster) {
       const best = first.variants[0];
-      if (!best) throw new Error('Master playlist tiada varian');
+      if (!best) throw new Error('Master playlist has no variants');
       videoUrl = best.url;
       if (!audioUrl && best.audio && first.audioGroups[best.audio]) {
         const g = first.audioGroups[best.audio];
@@ -101,14 +101,14 @@ async function runJob({ jobId, url, variantUrl, audioUrl, title }) {
     if (audioUrl) tasks.push(downloadMedia(audioUrl, jobId, 'audio', ctrl.signal, progress));
     const [video, audio] = await Promise.all(tasks);
 
-    send({ type: 'job-progress', jobId, status: 'menyimpan', done: progress.done, total: progress.total, bytes: progress.bytes });
+    send({ type: 'job-progress', jobId, status: 'saving', done: progress.done, total: progress.total, bytes: progress.bytes });
     await send({ type: 'job-file', jobId, blobUrl: URL.createObjectURL(video.blob), title: audio ? `${title} (video)` : title, ext: video.ext });
     if (audio) {
       await send({ type: 'job-file', jobId, blobUrl: URL.createObjectURL(audio.blob), title: `${title} (audio)`, ext: audio.ext === 'ts' ? 'ts' : 'm4a' });
     }
     const notes = [];
-    if (audio) notes.push('Audio berasingan — gabung: ffmpeg -i video -i audio -c copy out.mp4');
-    if (video.live) notes.push('Siaran langsung: hanya tetingkap semasa dimuat turun.');
+    if (audio) notes.push('Separate audio — merge with: ffmpeg -i video -i audio -c copy out.mp4');
+    if (video.live) notes.push('Live stream: only the current window was downloaded.');
     send({ type: 'job-done', jobId, note: notes.join(' ') || null });
   } catch (e) {
     send({ type: 'job-error', jobId, error: String(e.message || e) });

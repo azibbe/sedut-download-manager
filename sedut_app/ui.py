@@ -1,4 +1,4 @@
-"""ui.py — tetingkap utama Sedut (PySide6)."""
+"""ui.py — Sedut main window (PySide6)."""
 from __future__ import annotations
 
 import json
@@ -29,22 +29,22 @@ MAX_ACTIVE = 3
 
 CATEGORIES = {
     "Video": {"mp4", "mkv", "webm", "mov", "avi", "m4v", "flv", "ts", "3gp"},
-    "Muzik": {"mp3", "m4a", "flac", "wav", "ogg", "opus", "aac"},
-    "Dokumen": {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "epub"},
-    "Program": {"deb", "rpm", "appimage", "exe", "msi", "pkg", "zst", "iso", "img", "run", "sh"},
-    "Mampatan": {"zip", "rar", "7z", "tar", "gz", "xz", "bz2", "tgz"},
-    "Gambar": {"jpg", "jpeg", "png", "gif", "webp", "svg"},
+    "Music": {"mp3", "m4a", "flac", "wav", "ogg", "opus", "aac"},
+    "Documents": {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "epub"},
+    "Programs": {"deb", "rpm", "appimage", "exe", "msi", "pkg", "zst", "iso", "img", "run", "sh"},
+    "Archives": {"zip", "rar", "7z", "tar", "gz", "xz", "bz2", "tgz"},
+    "Images": {"jpg", "jpeg", "png", "gif", "webp", "svg"},
 }
 
 
 def category_dir(filename: str, kind: str, audio_only: bool = False) -> str:
     if kind == "media":
-        return str(BASE_DIR / ("Muzik" if audio_only else "Video"))
+        return str(BASE_DIR / ("Music" if audio_only else "Video"))
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     for cat, exts in CATEGORIES.items():
         if ext in exts:
             return str(BASE_DIR / cat)
-    return str(BASE_DIR / "Lain")
+    return str(BASE_DIR / "Other")
 
 
 def notify(title: str, body: str):
@@ -52,7 +52,7 @@ def notify(title: str, body: str):
         subprocess.Popen(["notify-send", "-a", "Sedut", "-i", "folder-download", title, body])
 
 
-# ------------------------------------------------------------- kesan (thread)
+# ------------------------------------------------------------- detection (thread)
 class _ProbeSignals(QObject):
     done = Signal(object)
 
@@ -66,18 +66,18 @@ class ProbeTask(QRunnable):
     def run(self):
         try:
             r = probe(self.url, self.cookies, referer=self.referer, user_agent=self.ua)
-        except Exception as e:  # jangan biar thread mati senyap
+        except Exception as e:  # never let the thread die silently
             r = ProbeResult(kind="none", url=self.url, error=str(e))
         self.signals.done.emit(r)
 
 
-# ------------------------------------------------------------- dialog hasil kesan
+# ------------------------------------------------------------- detection result dialog
 GENERIC = {"index", "master", "playlist", "video", "videoplayback", "chunklist", "manifest",
            "prog_index", "media", "stream", "file", "download", "fail", "main"}
 
 
 def _better_name(r: ProbeResult, page_title: str | None) -> str | None:
-    """Link dari extension selalunya index.m3u8 / videoplayback — guna tajuk halaman."""
+    """Links from the extension are often index.m3u8 / videoplayback — use the page title instead."""
     if not page_title:
         return None
     stem, dot, ext = r.filename.rpartition(".") if r.kind == "file" else (r.filename, "", "")
@@ -97,42 +97,42 @@ class DetectDialog(QDialog):
         better = _better_name(r, self.hint.get("title"))
         if better:
             r.filename = better
-        self.setWindowTitle("Dikesan — Sedut")
+        self.setWindowTitle("Detected — Sedut")
         self.setMinimumWidth(560)
         form = QFormLayout()
 
-        kind = "Video / media" + (f" ({r.extractor})" if r.extractor else "") if r.kind == "media" else (r.mime or "fail")
-        form.addRow("Jenis:", QLabel(kind))
+        kind = "Video / media" + (f" ({r.extractor})" if r.extractor else "") if r.kind == "media" else (r.mime or "file")
+        form.addRow("Type:", QLabel(kind))
         title = QLabel(r.title); title.setWordWrap(True)
-        form.addRow("Tajuk:", title)
+        form.addRow("Title:", title)
         if r.duration:
             m, s = divmod(int(r.duration), 60)
-            form.addRow("Tempoh:", QLabel(f"{m}:{s:02d}"))
+            form.addRow("Duration:", QLabel(f"{m}:{s:02d}"))
 
         self.quality = None
-        self.size_lbl = QLabel(human_size(r.size) + ("" if r.kind == "media" or r.resumable else "  (pelayan tak sokong sambung)"))
+        self.size_lbl = QLabel(human_size(r.size) + ("" if r.kind == "media" or r.resumable else "  (server does not support resume)"))
         if r.kind == "media":
             self.quality = QComboBox()
             for c in r.choices:
                 self.quality.addItem(c.label + (f"  ~{human_size(c.size)}" if c.size else ""), c)
             self.quality.currentIndexChanged.connect(self._quality_changed)
-            form.addRow("Kualiti:", self.quality)
-        form.addRow("Saiz:", self.size_lbl)
+            form.addRow("Quality:", self.quality)
+        form.addRow("Size:", self.size_lbl)
 
         self.name = QLineEdit(r.filename)
-        form.addRow("Nama fail:", self.name)
+        form.addRow("File name:", self.name)
 
         folder_row = QHBoxLayout()
         self.folder = QLineEdit()
-        browse = QPushButton("Pilih…")
+        browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse)
         folder_row.addWidget(self.folder, 1); folder_row.addWidget(browse)
-        form.addRow("Simpan ke:", folder_row)
+        form.addRow("Save to:", folder_row)
 
         buttons = QDialogButtonBox()
-        ok = buttons.addButton("Muat turun", QDialogButtonBox.AcceptRole)
+        ok = buttons.addButton("Download", QDialogButtonBox.AcceptRole)
         ok.setDefault(True)
-        buttons.addButton("Batal", QDialogButtonBox.RejectRole)
+        buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
 
         lay = QVBoxLayout(self)
@@ -145,11 +145,11 @@ class DetectDialog(QDialog):
     def _quality_changed(self, *_):
         c = self._choice()
         if c is not None:
-            self.size_lbl.setText(f"~{human_size(c.size)}" if c.size else "tidak diketahui (dikira semasa muat turun)")
+            self.size_lbl.setText(f"~{human_size(c.size)}" if c.size else "unknown (determined during download)")
         self.folder.setText(category_dir(self.name.text(), self.r.kind, bool(c and c.audio_only)))
 
     def _browse(self):
-        d = QFileDialog.getExistingDirectory(self, "Pilih folder", self.folder.text())
+        d = QFileDialog.getExistingDirectory(self, "Choose folder", self.folder.text())
         if d:
             self.folder.setText(d)
 
@@ -166,8 +166,8 @@ class DetectDialog(QDialog):
         )
 
 
-# ------------------------------------------------------------- tetingkap utama
-COLS = ["Nama", "Saiz", "Kemajuan", "Kelajuan", "Baki masa", "Status"]
+# ------------------------------------------------------------- main window
+COLS = ["Name", "Size", "Progress", "Speed", "Time left", "Status"]
 
 
 class MainWindow(QMainWindow):
@@ -185,23 +185,23 @@ class MainWindow(QMainWindow):
         self._hint: dict = {}
         self._ext_queue: list[dict] = []
 
-        # --- bar URL
+        # --- URL bar
         self.url = QLineEdit()
-        self.url.setPlaceholderText("Paste link di sini (Ctrl+V) — Sedut akan kesan sendiri")
+        self.url.setPlaceholderText("Paste a link here (Ctrl+V) — Sedut detects it automatically")
         self.url.setClearButtonEnabled(True)
         self.url.returnPressed.connect(self.detect)
         self.url.textChanged.connect(lambda _: self._debounce.start())
         self._debounce = QTimer(self, singleShot=True, interval=500, timeout=self._auto_detect)
         self._last_probed = ""
-        self.detect_btn = QPushButton("Kesan")
+        self.detect_btn = QPushButton("Detect")
         self.detect_btn.clicked.connect(self.detect)
-        self.cookies = QCheckBox("Guna cookies Chrome")
-        self.cookies.setToolTip("Untuk YouTube/Facebook/Vimeo yang minta log masuk atau semakan 'bukan bot'.\n"
-                                "yt-dlp baca cookies dari profil Google Chrome anda.")
+        self.cookies = QCheckBox("Use Chrome cookies")
+        self.cookies.setToolTip("For YouTube/Facebook/Vimeo when they ask you to sign in or prove you're not a bot.\n"
+                                "yt-dlp reads the cookies from your Google Chrome profile.")
         top = QHBoxLayout()
         top.addWidget(self.url, 1); top.addWidget(self.detect_btn); top.addWidget(self.cookies)
 
-        # --- jadual
+        # --- table
         self.table = QTableWidget(0, len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -222,26 +222,26 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         # --- toolbar
-        tb = QToolBar("Tindakan"); tb.setMovable(False)
+        tb = QToolBar("Actions"); tb.setMovable(False)
         tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.addToolBar(tb)
-        self.a_resume = QAction(QIcon.fromTheme("media-playback-start"), "Sambung", self, triggered=self.resume)
-        self.a_pause = QAction(QIcon.fromTheme("media-playback-pause"), "Jeda", self, triggered=self.pause)
-        self.a_remove = QAction(QIcon.fromTheme("edit-delete"), "Buang", self, triggered=self.remove)
+        self.a_resume = QAction(QIcon.fromTheme("media-playback-start"), "Resume", self, triggered=self.resume)
+        self.a_pause = QAction(QIcon.fromTheme("media-playback-pause"), "Pause", self, triggered=self.pause)
+        self.a_remove = QAction(QIcon.fromTheme("edit-delete"), "Remove", self, triggered=self.remove)
         self.a_remove.setShortcut(QKeySequence.Delete)
-        self.a_open = QAction(QIcon.fromTheme("document-open"), "Buka fail", self, triggered=self.open_file)
-        self.a_folder = QAction(QIcon.fromTheme("folder-open"), "Buka folder", self, triggered=self.open_folder)
-        self.a_retry = QAction(QIcon.fromTheme("view-refresh"), "Cuba semula", self, triggered=self.resume)
+        self.a_open = QAction(QIcon.fromTheme("document-open"), "Open file", self, triggered=self.open_file)
+        self.a_folder = QAction(QIcon.fromTheme("folder-open"), "Open folder", self, triggered=self.open_folder)
+        self.a_retry = QAction(QIcon.fromTheme("view-refresh"), "Retry", self, triggered=self.resume)
         for a in (self.a_resume, self.a_pause, self.a_remove, self.a_open, self.a_folder):
             tb.addAction(a)
 
         self._save_timer = QTimer(self, singleShot=True, interval=1500, timeout=self.save)
         self._load()
         self._update_actions()
-        self.statusBar().showMessage("Sedia. Paste link untuk mula.")
+        self.statusBar().showMessage("Ready. Paste a link to start.")
         self._st = QTimer(self, interval=1000, timeout=self._status); self._st.start()
 
-    # ---------------------------------------------------- kesan
+    # ---------------------------------------------------- detect
     def _auto_detect(self):
         t = self.url.text().strip()
         if looks_like_url(t) and t != self._last_probed:
@@ -250,13 +250,13 @@ class MainWindow(QMainWindow):
     def detect(self):
         t = self.url.text().strip()
         if not looks_like_url(t):
-            self.statusBar().showMessage("Itu bukan link http/https/ftp yang sah.", 4000)
+            self.statusBar().showMessage("That is not a valid http/https/ftp link.", 4000)
             return
         if self._probing:
             return
         self._probing, self._last_probed = True, t
-        self.detect_btn.setEnabled(False); self.detect_btn.setText("Mengesan…")
-        self.statusBar().showMessage(f"Mengesan {t} …")
+        self.detect_btn.setEnabled(False); self.detect_btn.setText("Detecting…")
+        self.statusBar().showMessage(f"Detecting {t} …")
         hint = self._hint if self._hint.get("url") == t else {}
         self._hint = hint
         task = ProbeTask(t, "chrome" if self.cookies.isChecked() else None,
@@ -266,7 +266,7 @@ class MainWindow(QMainWindow):
 
     def _probed(self, r: ProbeResult):
         self._probing = False
-        self.detect_btn.setEnabled(True); self.detect_btn.setText("Kesan")
+        self.detect_btn.setEnabled(True); self.detect_btn.setText("Detect")
         self._dialog_open = True
         try:
             self._show_result(r)
@@ -277,23 +277,23 @@ class MainWindow(QMainWindow):
 
     def _show_result(self, r: ProbeResult):
         if r.kind == "none":
-            self.statusBar().showMessage("Tiada fail/video dikesan.", 5000)
-            msg = r.error or "Tiada fail atau video dikesan pada link ini."
+            self.statusBar().showMessage("No file or video detected.", 5000)
+            msg = r.error or "No file or video was detected at this link."
             if any(k in msg.lower() for k in ("sign in", "log", "cookies", "bot", "forbidden", "403")) and not self.cookies.isChecked():
-                msg += "\n\nCuba tanda 'Guna cookies Chrome' dan kesan semula."
-            QMessageBox.warning(self, "Tidak dikesan", msg[:1200])
+                msg += "\n\nTry ticking 'Use Chrome cookies' and detect again."
+            QMessageBox.warning(self, "Not detected", msg[:1200])
             return
-        self.statusBar().showMessage(f"Dikesan: {r.title}", 4000)
+        self.statusBar().showMessage(f"Detected: {r.title}", 4000)
         dlg = DetectDialog(r, "chrome" if self.cookies.isChecked() else None, self, hint=self._hint)
         if dlg.exec() == QDialog.Accepted:
             self.add(dlg.download())
             self.url.clear(); self._last_probed = ""
 
-    # ---------------------------------------------------- terima link dari luar
+    # ---------------------------------------------------- receive links from outside
     def start_ipc(self) -> bool:
-        """Dengar pada soket Unix supaya extension Chrome / instance kedua boleh hantar link."""
+        """Listen on a Unix socket so the Chrome extension / a second instance can send links."""
         path = ipc.socket_path()
-        QLocalServer.removeServer(path)          # soket basi dari crash lama
+        QLocalServer.removeServer(path)          # stale socket left by an earlier crash
         self.server = QLocalServer(self)
         self.server.setSocketOptions(QLocalServer.UserAccessOption)
         ok = self.server.listen(path)
@@ -306,7 +306,7 @@ class MainWindow(QMainWindow):
             c.setProperty("buf", b"")
             c.readyRead.connect(lambda c=c: self._ipc_read(c))
             c.disconnected.connect(c.deleteLater)
-            if c.bytesAvailable():        # data sampai sebelum readyRead disambung
+            if c.bytesAvailable():        # data arrived before readyRead was connected
                 self._ipc_read(c)
 
     def _ipc_read(self, c):
@@ -317,7 +317,7 @@ class MainWindow(QMainWindow):
         try:
             payload = json.loads(buf.split(b"\n", 1)[0])
         except ValueError:
-            c.write(b'{"ok": false, "error": "JSON rosak"}\n'); c.flush(); c.disconnectFromServer()
+            c.write(b'{"ok": false, "error": "Invalid JSON"}\n'); c.flush(); c.disconnectFromServer()
             return
         c.write(b'{"ok": true}\n'); c.flush(); c.disconnectFromServer()
         if payload.get("action") == "add" and looks_like_url(payload.get("url", "")):
@@ -329,7 +329,7 @@ class MainWindow(QMainWindow):
         self._ext_queue.append(payload)
         self.showNormal(); self.raise_(); self.activateWindow()
         n = len(self._ext_queue)
-        self.statusBar().showMessage(f"Link diterima dari Chrome ({n} dalam giliran)", 4000)
+        self.statusBar().showMessage(f"Link received from Chrome ({n} in queue)", 4000)
         self._next_external()
 
     def _next_external(self):
@@ -342,7 +342,7 @@ class MainWindow(QMainWindow):
         self._last_probed = ""
         self.detect()
 
-    # ---------------------------------------------------- senarai
+    # ---------------------------------------------------- list
     def add(self, d: Download, start: bool = True):
         self.downloads[d.id] = d
         row = self.table.rowCount()
@@ -365,14 +365,14 @@ class MainWindow(QMainWindow):
         if d.picked and not d.final_path:
             name += f"  ·  format {d.picked}"
         self.table.item(row, 0).setText(name)
-        self.table.item(row, 0).setToolTip(f"{d.url}\n{d.folder}" + (f"\n\nRalat: {d.error}" if d.error else ""))
+        self.table.item(row, 0).setToolTip(f"{d.url}\n{d.folder}" + (f"\n\nError: {d.error}" if d.error else ""))
         self.table.item(row, 1).setText(human_size(d.size))
         bar: QProgressBar = self.table.cellWidget(row, 2)
         bar.setValue(int(d.percent * 10)); bar.setFormat(f"{d.percent:.1f}%")
         self.table.item(row, 3).setText(d.speed)
         self.table.item(row, 4).setText(d.eta)
         st = self.table.item(row, 5)
-        st.setText(d.status if d.status != FAILED else f"Gagal")
+        st.setText(d.status)
         st.setToolTip(d.error)
 
     def _schedule(self):
@@ -396,13 +396,13 @@ class MainWindow(QMainWindow):
         if d:
             self._render(did)
             if d.status == DONE:
-                notify("Muat turun siap", os.path.basename(d.final_path) or d.filename)
+                notify("Download complete", os.path.basename(d.final_path) or d.filename)
             elif d.status == FAILED:
-                notify("Muat turun gagal", f"{d.filename}\n{d.error[:150]}")
+                notify("Download failed", f"{d.filename}\n{d.error[:150]}")
         self._save_timer.start()
         self._schedule()
 
-    # ---------------------------------------------------- tindakan
+    # ---------------------------------------------------- actions
     def _selected(self) -> list[Download]:
         ids = {self.table.item(i.row(), 0).data(Qt.UserRole) for i in self.table.selectionModel().selectedRows()}
         return [self.downloads[i] for i in ids if i in self.downloads]
@@ -435,10 +435,10 @@ class MainWindow(QMainWindow):
         sel = self._selected()
         if not sel:
             return
-        box = QMessageBox(QMessageBox.Question, "Buang", f"Buang {len(sel)} item dari senarai?", parent=self)
-        only = box.addButton("Buang dari senarai", QMessageBox.AcceptRole)
-        also = box.addButton("Buang + padam fail", QMessageBox.DestructiveRole)
-        box.addButton("Batal", QMessageBox.RejectRole)
+        box = QMessageBox(QMessageBox.Question, "Remove", f"Remove {len(sel)} item(s) from the list?", parent=self)
+        only = box.addButton("Remove from list", QMessageBox.AcceptRole)
+        also = box.addButton("Remove + delete files", QMessageBox.DestructiveRole)
+        box.addButton("Cancel", QMessageBox.RejectRole)
         box.exec()
         if box.clickedButton() not in (only, also):
             return
@@ -493,7 +493,7 @@ class MainWindow(QMainWindow):
         m = QMenu(self)
         for a in (self.a_resume, self.a_pause, self.a_open, self.a_folder):
             m.addAction(a)
-        copy = m.addAction("Salin link")
+        copy = m.addAction("Copy link")
         m.addSeparator(); m.addAction(self.a_remove)
         if m.exec(self.table.viewport().mapToGlobal(pos)) is copy:
             sel = self._selected()
@@ -503,11 +503,11 @@ class MainWindow(QMainWindow):
     def _status(self):
         running = [d for d in self.downloads.values() if d.status == RUNNING]
         if running:
-            self.statusBar().showMessage(f"{len(running)} sedang dimuat turun · "
-                                         f"{sum(1 for d in self.downloads.values() if d.status == QUEUED)} menunggu")
+            self.statusBar().showMessage(f"{len(running)} downloading · "
+                                         f"{sum(1 for d in self.downloads.values() if d.status == QUEUED)} queued")
         self._update_actions()
 
-    # ---------------------------------------------------- simpan / muat
+    # ---------------------------------------------------- save / load
     def save(self):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp = STORE.with_suffix(".tmp")
@@ -524,14 +524,14 @@ class MainWindow(QMainWindow):
         for raw in data:
             d = Download.from_dict(raw)
             if d.status in (RUNNING, QUEUED):
-                d.status, d.speed, d.eta = PAUSED, "", ""   # jangan auto-mula selepas buka semula
+                d.status, d.speed, d.eta = PAUSED, "", ""   # never auto-start after reopening
             self.add(d, start=False)
 
     def closeEvent(self, e):
         running = [r for r in self.runners.values()]
         if running:
-            ans = QMessageBox.question(self, "Keluar", f"{len(running)} muat turun masih berjalan. Jeda dan keluar?\n"
-                                                       "(Boleh disambung bila buka Sedut semula.)")
+            ans = QMessageBox.question(self, "Quit", f"{len(running)} download(s) still running. Pause and quit?\n"
+                                                     "(You can resume them when you open Sedut again.)")
             if ans != QMessageBox.Yes:
                 e.ignore(); return
             for r in running:

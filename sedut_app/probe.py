@@ -1,6 +1,6 @@
-"""probe.py — kesan apa yang ada di sebalik satu URL.
+"""probe.py — detect what is behind a URL.
 
-Tiada kod GUI di sini supaya boleh diuji terus dari terminal:
+No GUI code here, so it can be tested straight from a terminal:
     /usr/bin/python3 -m sedut_app.probe <url>
 """
 from __future__ import annotations
@@ -22,12 +22,12 @@ STREAM_MIME = ("mpegurl", "dash+xml")
 
 @dataclass
 class Choice:
-    """Satu pilihan kualiti yang dipapar dalam combo box."""
+    """One quality option shown in the combo box."""
     label: str
-    fmt: str | None = None          # nilai -f yt-dlp
-    sort: str | None = None         # nilai -S yt-dlp
+    fmt: str | None = None          # yt-dlp -f value
+    sort: str | None = None         # yt-dlp -S value
     audio_only: bool = False
-    size: int | None = None         # anggaran bait
+    size: int | None = None         # estimated bytes
 
 
 @dataclass
@@ -45,7 +45,7 @@ class ProbeResult:
     error: str = ""
 
 
-# ---------------------------------------------------------------- utiliti
+# ---------------------------------------------------------------- utilities
 def human_size(n: int | float | None) -> str:
     if not n:
         return "?"
@@ -58,11 +58,11 @@ def human_size(n: int | float | None) -> str:
 
 def safe_filename(name: str, limit: int = 180) -> str:
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", name).strip().strip(".")
-    return (name or "fail")[:limit]
+    return (name or "file")[:limit]
 
 
 def _filename_from_cd(cd: str) -> str:
-    # RFC 5987: filename*=UTF-8''nama%20fail.zip
+    # RFC 5987: filename*=UTF-8''file%20name.zip
     m = re.search(r"filename\*\s*=\s*[^']*''([^;]+)", cd, re.I)
     if m:
         return urllib.parse.unquote(m.group(1).strip('" '))
@@ -74,10 +74,10 @@ def looks_like_url(text: str) -> bool:
     return bool(re.match(r"^(https?|ftp)://\S+$", text.strip(), re.I))
 
 
-# ---------------------------------------------------------------- fail terus
+# ---------------------------------------------------------------- direct file
 def probe_direct(url: str, timeout: float = 15, referer: str | None = None,
                  user_agent: str | None = None) -> ProbeResult | None:
-    """Minta bait pertama sahaja (Range: bytes=0-0). Pulangkan None kalau HTML/stream."""
+    """Request only the first byte (Range: bytes=0-0). Return None for HTML/streams."""
     headers = {"User-Agent": user_agent or UA, "Range": "bytes=0-0"}
     if referer:
         headers["Referer"] = referer
@@ -98,12 +98,12 @@ def probe_direct(url: str, timeout: float = 15, referer: str | None = None,
                 size = int(h["Content-Length"])
             name = _filename_from_cd(h.get("Content-Disposition") or "")
             if not name:
-                name = urllib.parse.unquote(os.path.basename(urllib.parse.urlparse(final).path)) or "fail"
+                name = urllib.parse.unquote(os.path.basename(urllib.parse.urlparse(final).path)) or "file"
             if final.lower().split("?")[0].endswith((".m3u8", ".mpd")):
                 return None
             return ProbeResult(kind="file", url=final, title=name, filename=safe_filename(name),
                                size=size, mime=mime, resumable=(r.status == 206))
-    except Exception as e:  # rangkaian/HTTP gagal — biar yt-dlp cuba pula
+    except Exception as e:  # network/HTTP failure — let yt-dlp try instead
         return ProbeResult(kind="none", url=url, error=f"{type(e).__name__}: {e}")
 
 
@@ -113,21 +113,21 @@ def _fmt_size(f: dict) -> int:
 
 
 def _pref_video(cand: list[dict]) -> dict:
-    """Tiru pilihan yt-dlp dgn -S res,fps,vcodec:h264 — h264 dulu, kalau tiada ambil tbr tertinggi."""
+    """Mimic yt-dlp's pick with -S res,fps,vcodec:h264 — h264 first, otherwise the highest tbr."""
     video_only = [f for f in cand if f.get("acodec") in (None, "none")] or cand
     h264 = [f for f in video_only if str(f.get("vcodec") or "").startswith(("avc1", "h264"))]
     return max(h264 or video_only, key=lambda f: (f.get("fps") or 0, f.get("tbr") or 0))
 
 
 def _res_label(f: dict) -> str:
-    # video letterbox 3840x1634 -> YouTube labelkan "2160p"; guna label itu, bukan tinggi mentah
+    # letterboxed 3840x1634 video -> YouTube labels it "2160p"; use that label, not the raw height
     m = re.search(r"(\d{3,4}p)", str(f.get("format_note") or ""))
     return m.group(1) if m else f"{f['height']}p"
 
 
 def build_choices(info: dict) -> list[Choice]:
     formats = info.get("formats") or [info]
-    # HLS generik selalunya vcodec=None tapi ada height — tetap dikira video
+    # generic HLS often has vcodec=None but a height — still counts as video
     videos = [f for f in formats if f.get("vcodec") != "none" and f.get("height")]
     audios = [f for f in formats if f.get("vcodec") == "none" and f.get("acodec") not in (None, "none")]
     m4a = [a for a in audios if a.get("ext") == "m4a"]
@@ -139,20 +139,20 @@ def build_choices(info: dict) -> list[Choice]:
         vbest = _pref_video([f for f in videos if f["height"] == h])
         has_audio = vbest.get("acodec") not in (None, "none")
         size = _fmt_size(vbest) + (0 if has_audio else best_audio)
-        label = _res_label(vbest) + (" (terbaik)" if i == 0 else "")
+        label = _res_label(vbest) + (" (best)" if i == 0 else "")
         fps = vbest.get("fps")
         if fps and fps > 30:
             label += f" {int(fps)}fps"
-        # PENTING: jangan letak acodec dalam -S — ia buat format gabungan 360p (id 18)
-        # menang atas video-only resolusi tinggi. Audio dipilih berasingan (ba[ext=m4a]).
+        # IMPORTANT: don't put acodec in -S — it makes the combined 360p format (id 18)
+        # win over high-resolution video-only formats. Audio is picked separately (ba[ext=m4a]).
         choices.append(Choice(
             label=label,
             fmt=f"bv*[height<={h}]+ba[ext=m4a]/bv*[height<={h}]+ba/b[height<={h}]/b",
             sort="res,fps,vcodec:h264", size=size or None))
     if not choices:
-        choices.append(Choice(label="Terbaik", fmt="bv*+ba/b", size=_fmt_size(info) or None))
+        choices.append(Choice(label="Best", fmt="bv*+ba/b", size=_fmt_size(info) or None))
     if audios or videos:
-        choices.append(Choice(label="Audio sahaja (MP3)", fmt="ba/b", audio_only=True,
+        choices.append(Choice(label="Audio only (MP3)", fmt="ba/b", audio_only=True,
                               size=best_audio or None))
     return choices
 
@@ -169,17 +169,17 @@ def probe_media(url: str, cookies_browser: str | None = None, timeout: float = 9
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError:
-        return ProbeResult(kind="none", url=url, error="yt-dlp tidak dipasang")
+        return ProbeResult(kind="none", url=url, error="yt-dlp is not installed")
     except subprocess.TimeoutExpired:
-        return ProbeResult(kind="none", url=url, error="yt-dlp tamat masa")
+        return ProbeResult(kind="none", url=url, error="yt-dlp timed out")
     if p.returncode != 0 or not p.stdout.strip():
-        err = (p.stderr.strip().splitlines() or ["tiada video dikesan"])[-1]
+        err = (p.stderr.strip().splitlines() or ["no video detected"])[-1]
         return ProbeResult(kind="none", url=url, error=err.replace("ERROR: ", ""))
     info = json.loads(p.stdout)
     if info.get("_type") == "playlist":
         entries = [e for e in info.get("entries") or [] if e]
         if not entries:
-            return ProbeResult(kind="none", url=url, error="Playlist kosong")
+            return ProbeResult(kind="none", url=url, error="Playlist is empty")
         info = entries[0]
     title = info.get("title") or "video"
     return ProbeResult(kind="media", url=url, title=title, filename=safe_filename(title),
@@ -196,7 +196,7 @@ def probe(url: str, cookies_browser: str | None = None, referer: str | None = No
     media = probe_media(url, cookies_browser, referer=referer, user_agent=user_agent)
     if media.kind == "media":
         return media
-    # dua-dua gagal: laporkan ralat yang paling berguna
+    # both failed: report the most useful error
     if direct and direct.error and "HTTPError" in direct.error:
         media.error = f"{direct.error} | {media.error}"
     return media
