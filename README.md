@@ -19,7 +19,7 @@ Paste a link, Sedut figures out what it is, and downloads it — direct files th
 - **Auto-sorted folders** — `~/Downloads/Sedut/{Video,Muzik,Dokumen,Program,Mampatan,Gambar,Lain}`.
 - **Browser cookies** — tick *Guna cookies Chrome* for sites that require login or a "not a bot" check (`yt-dlp --cookies-from-browser chrome`).
 - **Single instance** — running `sedut <url>` while Sedut is open sends the link to the existing window (Unix socket).
-- **Chrome integration (optional)** — a native messaging host lets a browser extension send links (with Referer, User-Agent and page title) straight into Sedut.
+- **Browser integration (optional)** — the bundled Video Grabber extension sends links (with Referer, User-Agent and page title) straight into Sedut through a native messaging host.
 - Desktop notifications on finish/failure (`notify-send`), download list persisted between sessions.
 
 ## Requirements
@@ -78,19 +78,41 @@ Test detection from a terminal without the GUI:
 python3 -m sedut_app.probe <url>
 ```
 
-## Browser extension (optional)
+## Browser extension: Video Grabber (optional)
 
-`sedut_host.py` is a [Chrome native messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging) host. The extension sends one JSON message:
+The [`extension/`](extension/) folder contains **Video Grabber**, a Chrome / Chromium / Brave extension (Manifest V3) that works on its own *and* as Sedut's browser companion.
+
+On its own it:
+
+- detects videos on any page from network traffic (`video/*`, HLS `.m3u8`, DASH `.mpd`) and the DOM (`<video>`, `<source>`, `og:video`, links) — the red badge shows how many were found in the tab;
+- downloads MP4 / WebM / MOV directly, and HLS by fetching + joining the segments in the browser (quality picker, AES-128 decryption).
+
+With Sedut installed it adds:
+
+- a **Sedut** button per detected video and a **Halaman → Sedut** button (sends the page URL so yt-dlp can handle YouTube, Facebook, TikTok…);
+- right-click menu items: *Muat turun dengan Sedut* (link), *Muat turun media ini dengan Sedut* (video/audio), *Hantar halaman ini ke Sedut* (page).
+
+Links are sent with the page's Referer, User-Agent and title, so Sedut names files after the page instead of `index.m3u8`.
+
+Install it:
+
+1. Open `chrome://extensions` and turn on **Developer mode**.
+2. **Load unpacked** → select the `extension/` folder of this repo.
+3. Run `./install.sh` (if you haven't) so the browser can reach Sedut.
+
+The extension ID is fixed at `mjdkcacdjpnnidoahofhfhgajkomcmmc` by the public `key` in `extension/manifest.json`, which is exactly the ID `install.sh` allows. If you remove that key or load a fork with a different key, update `EXT_ID` in `install.sh` and re-run it.
+
+Limits: DRM-protected video (Netflix, Disney+, Widevine/FairPlay) is not supported, by design. YouTube and other MSE players split video into small ranges, so use the *Halaman → Sedut* button for those. See [`extension/README.md`](extension/README.md) (Malay) for details.
+
+### Native messaging protocol
+
+`sedut_host.py` is a [Chrome native messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging) host (`com.sedut.host`). The extension sends one JSON message:
 
 ```json
 {"action": "add", "url": "...", "referer": "...", "title": "...", "kind": "...", "userAgent": "..."}
 ```
 
-The host forwards it to the running Sedut (launching it first if needed, waiting up to 15 s) and replies `{"ok": true, "how": "running" | "launched"}`. `{"action": "ping"}` reports whether Sedut is running.
-
-`install.sh` only allows the extension ID `mjdkcacdjpnnidoahofhfhgajkomcmmc` (a companion "Video Grabber" extension, not included in this repo). To use your own extension, change `EXT_ID` in `install.sh` and re-run it.
-
-Host log: `~/.local/state/sedut/host.log`.
+The host forwards it to the running Sedut (launching it first if needed, waiting up to 15 s) and replies `{"ok": true, "how": "running" | "launched"}`. `{"action": "ping"}` reports whether Sedut is running. Host log: `~/.local/state/sedut/host.log`.
 
 ## Files & paths
 
@@ -113,6 +135,7 @@ sedut_app/
   engine.py         Download model, aria2c / yt-dlp command builder, progress parsing (QProcess)
   ui.py             main window, detect dialog, queue, persistence, IPC server
   ipc.py            Unix-socket client used by the 2nd instance and the native host
+extension/          Video Grabber browser extension (MV3)
 ```
 
 ## Uninstall
@@ -138,6 +161,7 @@ Sedut ialah download manager ringkas untuk Linux (CachyOS / KDE Plasma), guna Py
 - Fail terus → aria2c, 8 sambungan, boleh Jeda/Sambung (walaupun selepas tutup aplikasi).
 - Video/HLS → yt-dlp (+ffmpeg gabung video+audio jadi MP4, atau MP3).
 - YouTube/FB minta log masuk → tanda *Guna cookies Chrome*.
+- Extension Chrome "Video Grabber" ada dalam folder `extension/` — *Load unpacked* di `chrome://extensions`, kemudian butang *Sedut* / menu klik kanan hantar link terus ke app.
 - Fail disusun ke `~/Downloads/Sedut/{Video,Muzik,Dokumen,Program,Mampatan,Gambar,Lain}`.
 
 Pasang:

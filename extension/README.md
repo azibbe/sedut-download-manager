@@ -3,8 +3,11 @@ Video Grabber — Chrome extension (Manifest V3)
 Cara pasang
   1. Buka chrome://extensions
   2. Hidupkan "Developer mode" (atas kanan)
-  3. Klik "Load unpacked" -> pilih folder ini (video-grabber)
+  3. Klik "Load unpacked" -> pilih folder ini (extension/ dalam repo Sedut)
   4. Pin ikon merah pada toolbar
+  5. (Pilihan) Jalankan ../install.sh supaya butang "Sedut" & menu klik kanan
+     boleh hantar link ke app desktop Sedut (native messaging).
+     ID extension tetap (mjdkcacdjpnnidoahofhfhgajkomcmmc) kerana "key" dalam manifest.json.
 
 Cara guna
   - Buka laman yang ada video, MAIN video tu sekejap (supaya stream dikesan dari rangkaian).

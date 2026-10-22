@@ -232,7 +232,7 @@ async function sendToSedut({ url, referer, title, kind }) {
   } catch (e) {
     const m = String(e.message || e);
     if (/not found|forbidden|Specified native messaging host/i.test(m)) {
-      return { ok: false, error: 'Sedut belum dipasang untuk Chrome. Jalankan: ~/Projects/sedut/install.sh' };
+      return { ok: false, error: 'Sedut belum dipasang untuk Chrome. Jalankan install.sh dalam folder Sedut.' };
     }
     return { ok: false, error: m };
   }
