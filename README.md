@@ -151,6 +151,11 @@ rm -r ~/.local/share/sedut ~/.local/state/sedut   # download history and log
 - Only download content you have the right to download. Respect each site's terms of service.
 - Site support is whatever your installed `yt-dlp` supports — keep it updated when a site stops working.
 
+## License
+
+[MIT](LICENSE) © 2026 azibbe — covers both the Sedut app and the `extension/` folder.
+Sedut calls `aria2c`, `yt-dlp` and `ffmpeg` as external programs; they keep their own licenses.
+
 ---
 
 ## Ringkasan (Bahasa Melayu)
