@@ -16,7 +16,7 @@ Paste a link, Sedut figures out what it is, and downloads it — direct files th
 - **Pause / resume** — survives app restarts (aria2c `.aria2` control files, yt-dlp `.part` files).
 - **Queue** — up to 3 downloads run at once, the rest wait.
 - **Auto-sorted folders** — `~/Downloads/Sedut/{Video,Music,Documents,Programs,Archives,Images,Other}`.
-- **Browser cookies** — tick *Use Chrome cookies* for sites that require login or a "not a bot" check (`yt-dlp --cookies-from-browser chrome`).
+- **Browser cookies** — for sites that require login or a "not a bot" check, pick your browser in the *Sign-in* box (Firefox, Chrome, Chromium, Brave, Edge, Vivaldi, Opera — only the ones installed are listed). yt-dlp then reads that browser's cookies (`--cookies-from-browser`). Firefox works from the regular, Flatpak and Snap installs; the choice is remembered.
 - **Single instance** — running `sedut <url>` while Sedut is open sends the link to the existing window (Unix socket).
 - **Browser integration (optional)** — the bundled Video Grabber extension sends links (with Referer, User-Agent and page title) straight into Sedut through a native messaging host.
 - Desktop notifications on finish/failure (`notify-send`), download list persisted between sessions.
@@ -119,6 +119,7 @@ The host forwards it to the running Sedut (launching it first if needed, waiting
 |---|---|
 | Downloads | `~/Downloads/Sedut/<category>/` |
 | Download list | `~/.local/share/sedut/downloads.json` |
+| Settings (cookie browser) | `~/.local/share/sedut/settings.json` |
 | IPC socket | `$XDG_RUNTIME_DIR/sedut-<uid>.sock` (override with `SEDUT_SOCKET`) |
 | Native host manifest | `~/.config/<browser>/NativeMessagingHosts/com.sedut.host.json` |
 | Command the host uses to launch Sedut | `SEDUT_CMD` env var (default: `sedut` on `PATH`) |
@@ -132,6 +133,7 @@ install.sh          per-user install: launcher, .desktop file, native host
 sedut_app/
   probe.py          URL detection: direct-file probe + yt-dlp metadata, quality choices
   engine.py         Download model, aria2c / yt-dlp command builder, progress parsing (QProcess)
+  browsers.py       finds installed browsers for the cookie picker
   ui.py             main window, detect dialog, queue, persistence, IPC server
   ipc.py            Unix-socket client used by the 2nd instance and the native host
 extension/          Video Grabber browser extension (MV3)

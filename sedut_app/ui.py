@@ -11,13 +11,13 @@ from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Si
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
     QMenu, QMessageBox, QProgressBar, QPushButton, QTableWidget, QTableWidgetItem,
     QToolBar, QVBoxLayout, QWidget,
 )
 
-from . import ipc
+from . import browsers, ipc
 from .engine import DONE, FAILED, PAUSED, QUEUED, RUNNING, Download, Runner
 from .probe import ProbeResult, human_size, looks_like_url, probe, safe_filename
 
@@ -195,11 +195,21 @@ class MainWindow(QMainWindow):
         self._last_probed = ""
         self.detect_btn = QPushButton("Detect")
         self.detect_btn.clicked.connect(self.detect)
-        self.cookies = QCheckBox("Use Chrome cookies")
+        self.cookies = QComboBox()
+        self.cookies.addItem("No cookies", None)
+        for key, label in browsers.installed():
+            self.cookies.addItem(f"{label} cookies", key)
         self.cookies.setToolTip("For YouTube/Facebook/Vimeo when they ask you to sign in or prove you're not a bot.\n"
-                                "yt-dlp reads the cookies from your Google Chrome profile.")
+                                "Pick the browser you are signed in with; yt-dlp reads its cookies.\n"
+                                "Only browsers found on this computer are listed.")
+        i = self.cookies.findData(self._settings().get("cookies_browser"))
+        self.cookies.setCurrentIndex(max(i, 0))
+        self.cookies.currentIndexChanged.connect(self._save_settings)
+        cookies_lbl = QLabel("Sign-in:")
+        cookies_lbl.setBuddy(self.cookies)
         top = QHBoxLayout()
-        top.addWidget(self.url, 1); top.addWidget(self.detect_btn); top.addWidget(self.cookies)
+        top.addWidget(self.url, 1); top.addWidget(self.detect_btn)
+        top.addWidget(cookies_lbl); top.addWidget(self.cookies)
 
         # --- table
         self.table = QTableWidget(0, len(COLS))
@@ -259,7 +269,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Detecting {t} …")
         hint = self._hint if self._hint.get("url") == t else {}
         self._hint = hint
-        task = ProbeTask(t, "chrome" if self.cookies.isChecked() else None,
+        task = ProbeTask(t, self.cookies.currentData(),
                          referer=hint.get("referer") or None, user_agent=hint.get("userAgent") or None)
         task.signals.done.connect(self._probed)
         self.pool.start(task)
@@ -279,12 +289,18 @@ class MainWindow(QMainWindow):
         if r.kind == "none":
             self.statusBar().showMessage("No file or video detected.", 5000)
             msg = r.error or "No file or video was detected at this link."
-            if any(k in msg.lower() for k in ("sign in", "log", "cookies", "bot", "forbidden", "403")) and not self.cookies.isChecked():
-                msg += "\n\nTry ticking 'Use Chrome cookies' and detect again."
+            if any(k in msg.lower() for k in ("sign in", "log", "cookies", "bot", "forbidden", "403")):
+                if self.cookies.currentData() is None:
+                    if self.cookies.count() > 1:
+                        msg += ("\n\nTip: choose the browser you are signed in with in the 'Sign-in' box "
+                                "(top right) and detect again.")
+                elif "cookie" in msg.lower():
+                    msg += (f"\n\nCould not use {self.cookies.currentText()}. Make sure you are signed in "
+                            "to this site in that browser, or pick another browser.")
             QMessageBox.warning(self, "Not detected", msg[:1200])
             return
         self.statusBar().showMessage(f"Detected: {r.title}", 4000)
-        dlg = DetectDialog(r, "chrome" if self.cookies.isChecked() else None, self, hint=self._hint)
+        dlg = DetectDialog(r, self.cookies.currentData(), self, hint=self._hint)
         if dlg.exec() == QDialog.Accepted:
             self.add(dlg.download())
             self.url.clear(); self._last_probed = ""
@@ -329,7 +345,7 @@ class MainWindow(QMainWindow):
         self._ext_queue.append(payload)
         self.showNormal(); self.raise_(); self.activateWindow()
         n = len(self._ext_queue)
-        self.statusBar().showMessage(f"Link received from Chrome ({n} in queue)", 4000)
+        self.statusBar().showMessage(f"Link received from the browser ({n} in queue)", 4000)
         self._next_external()
 
     def _next_external(self):
@@ -508,6 +524,22 @@ class MainWindow(QMainWindow):
         self._update_actions()
 
     # ---------------------------------------------------- save / load
+    @staticmethod
+    def _settings() -> dict:
+        try:
+            data = json.loads(SETTINGS.read_text())
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_settings(self, *_):
+        s = self._settings()
+        s["cookies_browser"] = self.cookies.currentData()
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = SETTINGS.with_suffix(".tmp")
+        tmp.write_text(json.dumps(s, indent=1))
+        tmp.replace(SETTINGS)
+
     def save(self):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp = STORE.with_suffix(".tmp")
